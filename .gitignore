@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# User uploads (binary files, not source code)
+uploads/*
+!uploads/.gitkeep
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# PHP composer (if added later)
+vendor/
+
+# Environment overrides (if added later)
+.env
+.env.local
