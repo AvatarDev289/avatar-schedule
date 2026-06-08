@@ -5,16 +5,13 @@
 require_once __DIR__ . '/functions.php';
 
 $filters = [
-    'search'        => trim($_GET['search'] ?? ''),
-    'status'        => $_GET['status'] ?? '',
-    'department_id' => $_GET['department_id'] ?? '',
+    'search' => trim($_GET['search'] ?? ''),
+    'status' => $_GET['status'] ?? '',
 ];
 
-$projects    = get_projects($filters);
-$departments = get_departments();
-$labels      = status_labels();
+$projects = get_projects($filters);
+$labels   = status_labels();
 
-// build query string for export links
 $qs = http_build_query(array_filter($filters));
 
 render_header('รายการ Project ทั้งหมด', 'projects.php');
@@ -33,14 +30,6 @@ render_header('รายการ Project ทั้งหมด', 'projects.php'
         <option value="">ทุกสถานะ</option>
         <?php foreach ($labels as $k => $lb): ?>
           <option value="<?= e($k) ?>" <?= $filters['status']===$k?'selected':'' ?>><?= e($lb) ?></option>
-        <?php endforeach; ?>
-      </select>
-      <select name="department_id" class="form-select">
-        <option value="">ทุกแผนก</option>
-        <?php foreach ($departments as $d): ?>
-          <option value="<?= (int)$d['id'] ?>" <?= (string)$filters['department_id']===(string)$d['id']?'selected':'' ?>>
-            <?= e($d['name']) ?>
-          </option>
         <?php endforeach; ?>
       </select>
       <button class="btn btn-primary"><i class="bi bi-funnel"></i> กรอง</button>
@@ -74,38 +63,32 @@ render_header('รายการ Project ทั้งหมด', 'projects.php'
             <th>#</th>
             <th>Project No.</th>
             <th>ชื่อโครงการ / ลูกค้า</th>
-            <th>แผนก</th>
-            <th>ผู้รับผิดชอบ</th>
-            <th>เริ่ม</th>
+            <th>วันเริ่ม</th>
             <th>กำหนดส่ง</th>
             <th style="width:140px">คืบหน้า</th>
-            <th class="text-end">มูลค่า</th>
             <th>สถานะ</th>
             <th class="text-center">จัดการ</th>
           </tr>
         </thead>
         <tbody>
           <?php if (!$projects): ?>
-            <tr><td colspan="11" class="text-center text-muted py-5">ไม่พบข้อมูลโครงการ</td></tr>
+            <tr><td colspan="8" class="text-center text-muted py-5">ไม่พบข้อมูลโครงการ</td></tr>
           <?php else: $i = 1; foreach ($projects as $p): $st = $p['effective_status']; ?>
             <tr>
               <td class="text-muted"><?= $i++ ?></td>
               <td class="fw-600"><?= e($p['project_no']) ?></td>
               <td>
                 <a href="project_view.php?id=<?= (int)$p['id'] ?>" class="link-title"><?= e($p['project_name']) ?></a>
-                <div class="text-muted small"><?= e($p['customer']) ?></div>
+                <div class="text-muted small"><?= e($p['customer'] ?: '-') ?></div>
               </td>
-              <td class="small"><?= e($p['department'] ?? '-') ?></td>
-              <td class="small"><?= e($p['responsible'] ?? '-') ?></td>
-              <td class="small"><?= e(format_date($p['start_date'])) ?></td>
-              <td class="small"><?= e(format_date($p['due_date'])) ?></td>
+              <td class="small"><?= e(format_date_dmy($p['start_date'])) ?></td>
+              <td class="small"><?= e(format_date_dmy($p['due_date'])) ?></td>
               <td>
                 <div class="progress-mini">
                   <div class="bar" style="width:<?= (int)$p['progress'] ?>%;background:<?= status_color($st) ?>"></div>
                 </div>
                 <span class="small text-muted"><?= (int)$p['progress'] ?>%</span>
               </td>
-              <td class="text-end fw-600"><?= money($p['amount']) ?></td>
               <td><span class="<?= status_badge_class($st) ?>"><?= e(status_label($st)) ?></span></td>
               <td class="text-center text-nowrap">
                 <a href="project_view.php?id=<?= (int)$p['id'] ?>" class="btn btn-sm btn-light" title="ดู"><i class="bi bi-eye"></i></a>

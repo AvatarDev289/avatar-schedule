@@ -21,19 +21,21 @@ $panelColors = panel_status_colors();
 $overdue = array_filter($projects, fn($p) => $p['effective_status'] === 'overdue');
 usort($overdue, fn($a, $b) => overdue_days($b) <=> overdue_days($a));
 
-// Upcoming deliveries grouped by month (not completed, has due date)
+// Upcoming deliveries grouped by month (exclude completed/delivered, must have due date)
 $deliveries = array_filter($projects, fn($p) =>
-    $p['effective_status'] !== 'completed' && !empty($p['due_date']));
+    !in_array($p['effective_status'], ['completed', 'delivered'], true) && !empty($p['due_date']));
 usort($deliveries, fn($a, $b) => strtotime($a['due_date']) <=> strtotime($b['due_date']));
 
 // Top cards definition (colors come from the brand token / status palette)
 $cards = [
-    ['ทั้งหมด',        $stats['total'],                'bi-folder',        'var(--primary-color)',        'projects.php'],
-    ['เสร็จแล้ว',       $stats['count']['completed'],   'bi-check-circle',  status_color('completed'),    'projects.php?status=completed'],
-    ['กำลังดำเนินการ',  $stats['count']['in_progress'], 'bi-gear',          status_color('in_progress'),  'projects.php?status=in_progress'],
-    ['ใกล้ครบกำหนด',    $stats['count']['near_due'],     'bi-alarm',         status_color('near_due'),     'projects.php?status=near_due'],
-    ['ล่าช้า',         $stats['count']['overdue'],     'bi-exclamation-octagon', status_color('overdue'),'projects.php?status=overdue'],
-    ['รอเริ่มงาน',      $stats['count']['pending'],      'bi-hourglass-split', status_color('pending'),    'projects.php?status=pending'],
+    ['ทั้งหมด',        $stats['total'],                         'bi-folder',              'var(--primary-color)',              'projects.php'],
+    ['ส่งมอบแล้ว',     $stats['count']['delivered'],            'bi-box-seam-fill',       status_color('delivered'),          'projects.php?status=delivered'],
+    ['ส่งมอบบางส่วน',  $stats['count']['partial_delivery'],     'bi-box-arrow-right',     status_color('partial_delivery'),   'projects.php?status=partial_delivery'],
+    ['เสร็จแล้ว',      $stats['count']['completed'],            'bi-check-circle',        status_color('completed'),          'projects.php?status=completed'],
+    ['กำลังดำเนินการ', $stats['count']['in_progress'],          'bi-gear',                status_color('in_progress'),        'projects.php?status=in_progress'],
+    ['ล่าช้า',         $stats['count']['overdue'],              'bi-exclamation-octagon', status_color('overdue'),            'projects.php?status=overdue'],
+    ['ใกล้ครบกำหนด',   $stats['count']['near_due'],             'bi-alarm',               status_color('near_due'),           'projects.php?status=near_due'],
+    ['รอเริ่มงาน',     $stats['count']['pending'],              'bi-hourglass-split',     status_color('pending'),            'projects.php?status=pending'],
 ];
 
 render_header('ภาพรวม Dashboard', 'index.php');
@@ -101,7 +103,7 @@ render_header('ภาพรวม Dashboard', 'index.php');
                 <div class="fw-600"><?= e($p['project_name']) ?></div>
                 <div class="text-muted small"><?= e($p['customer']) ?></div>
               </td>
-              <td><?= e(format_date($p['due_date'])) ?></td>
+              <td><?= e(format_date_dmy($p['due_date'])) ?></td>
               <td>
                 <div class="progress-mini">
                   <div class="bar" style="width:<?= (int)$p['progress'] ?>%;background:<?= status_color($st) ?>"></div>
@@ -168,7 +170,7 @@ render_header('ภาพรวม Dashboard', 'index.php');
                 <div class="text-muted small text-truncate" style="max-width:220px"><?= e($p['project_name']) ?></div>
               </td>
               <td class="small"><?= e($p['customer']) ?></td>
-              <td class="small"><?= e(format_date($p['due_date'])) ?></td>
+              <td class="small"><?= e(format_date_dmy($p['due_date'])) ?></td>
               <td class="text-end"><span class="badge bg-danger"><?= overdue_days($p) ?> วัน</span></td>
             </tr>
           <?php endforeach; endif; ?>
@@ -193,7 +195,7 @@ render_header('ภาพรวม Dashboard', 'index.php');
                 <div class="fw-600"><?= e($p['project_no']) ?></div>
                 <div class="text-muted small text-truncate" style="max-width:200px"><?= e($p['customer']) ?></div>
               </td>
-              <td class="small"><?= e(format_date($p['due_date'])) ?></td>
+              <td class="small"><?= e(format_date_dmy($p['due_date'])) ?></td>
               <td class="text-end">
                 <?php if ($dr < 0): ?>
                   <span class="badge bg-danger">เลย <?= abs($dr) ?> วัน</span>

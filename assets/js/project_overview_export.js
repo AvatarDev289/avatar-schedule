@@ -23,7 +23,9 @@
     var totalH = 0;
     pages().forEach(function (pg) {
       pg.style.transform = 'scale(' + scale + ')';
-      totalH += pg.offsetHeight * scale + 28;
+      if (!pg.classList.contains('page-preview-hidden')) {
+        totalH += pg.offsetHeight * scale + 28;
+      }
     });
     stage.style.minHeight = (totalH + 40) + 'px';
   }
@@ -65,13 +67,24 @@
     return 'overview-' + no.trim().replace(/[^\w\-]+/g, '_');
   }
 
-  /* Export every page sequentially as image files. */
+  /* Export every page sequentially as image files.
+     Temporarily reveals pages hidden by the preview navigator so html2canvas
+     can capture them, then restores the hidden state when done. */
   function exportAll(mime, ext, quality) {
     var list = pages();
+    var wasHidden = list.filter(function (pg) { return pg.classList.contains('page-preview-hidden'); });
+    wasHidden.forEach(function (pg) { pg.classList.remove('page-preview-hidden'); });
+    fitPreview();
+
     showStatus(true, 'กำลังสร้างรูปภาพ...');
     var i = 0;
     function next() {
-      if (i >= list.length) { showStatus(false); return; }
+      if (i >= list.length) {
+        showStatus(false);
+        wasHidden.forEach(function (pg) { pg.classList.add('page-preview-hidden'); });
+        fitPreview();
+        return;
+      }
       var idx = i + 1;
       showStatus(true, 'กำลังสร้างรูปภาพ ' + idx + '/' + list.length + ' ...');
       renderPage(list[i]).then(function (c) {
@@ -90,11 +103,18 @@
 
   /* ---- Print / Save as PDF (all pages) ---- */
   window.printPDF = function () {
-    var prev = pages().map(function (pg) { var t = pg.style.transform; pg.style.transform = 'none'; return t; });
+    var pgs = pages();
+    var wasHidden = pgs.filter(function (pg) { return pg.classList.contains('page-preview-hidden'); });
+    wasHidden.forEach(function (pg) { pg.classList.remove('page-preview-hidden'); });
+    var prev = pgs.map(function (pg) { var t = pg.style.transform; pg.style.transform = 'none'; return t; });
     var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
     fontsReady.then(function () {
       window.print();
-      setTimeout(function () { pages().forEach(function (pg, i) { pg.style.transform = prev[i]; }); fitPreview(); }, 600);
+      setTimeout(function () {
+        pgs.forEach(function (pg, i) { pg.style.transform = prev[i]; });
+        wasHidden.forEach(function (pg) { pg.classList.add('page-preview-hidden'); });
+        fitPreview();
+      }, 600);
     });
   };
 

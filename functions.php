@@ -51,6 +51,42 @@ function format_date(?string $date): string
     return sprintf('%d %s %d', $d, $months[$m], $y);
 }
 
+/** Format date as dd/mm/yyyy (Gregorian). Returns '-' for empty / invalid dates. */
+function format_date_dmy(?string $date): string
+{
+    if (empty($date) || $date === '0000-00-00') return '-';
+    $ts = strtotime($date);
+    if ($ts === false) return '-';
+    return date('d/m/Y', $ts);
+}
+
+/**
+ * Parse user-entered "DD/MM/YYYY" into "YYYY-MM-DD" for database storage.
+ * Also accepts "YYYY-MM-DD" passthrough (already correct format).
+ * Returns null for empty, invalid, or out-of-range dates.
+ */
+function parse_date_dmy(?string $raw): ?string
+{
+    if ($raw === null || trim($raw) === '') {
+        return null;
+    }
+    $raw = trim($raw);
+    // Passthrough: already YYYY-MM-DD
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+        $ts = strtotime($raw);
+        return ($ts !== false) ? date('Y-m-d', $ts) : null;
+    }
+    // Parse DD/MM/YYYY
+    if (!preg_match('/^(\d{2})\/(\d{2})\/(\d{4})$/', $raw, $m)) {
+        return null;
+    }
+    [$_, $d, $mo, $y] = $m;
+    if (!checkdate((int)$mo, (int)$d, (int)$y)) {
+        return null;
+    }
+    return sprintf('%04d-%02d-%02d', (int)$y, (int)$mo, (int)$d);
+}
+
 /* ======================================================================
  *  Status logic
  * ==================================================================== */
@@ -59,11 +95,13 @@ function format_date(?string $date): string
 function status_labels(): array
 {
     return [
-        'pending'     => 'รอเริ่มงาน',
-        'in_progress' => 'กำลังดำเนินการ',
-        'near_due'    => 'ใกล้ครบกำหนด',
-        'completed'   => 'เสร็จแล้ว',
-        'overdue'     => 'ล่าช้า / Overdue',
+        'pending'          => 'รอเริ่มงาน',
+        'in_progress'      => 'กำลังดำเนินการ',
+        'near_due'         => 'ใกล้ครบกำหนด',
+        'partial_delivery' => 'ส่งมอบบางส่วน',
+        'delivered'        => 'ส่งมอบแล้ว',
+        'completed'        => 'เสร็จแล้ว',
+        'overdue'          => 'ล่าช้า / Overdue',
     ];
 }
 
@@ -71,11 +109,13 @@ function status_labels(): array
 function status_colors(): array
 {
     return [
-        'pending'     => '#6B7280', // gray-500
-        'in_progress' => '#3B82F6', // info blue
-        'near_due'    => '#F59E0B', // warning
-        'completed'   => '#10B981', // success
-        'overdue'     => '#EF4444', // danger
+        'pending'          => '#6B7280', // gray-500
+        'in_progress'      => '#3B82F6', // info blue
+        'near_due'         => '#F59E0B', // warning
+        'partial_delivery' => '#8B5CF6', // violet
+        'delivered'        => '#059669', // emerald-dark
+        'completed'        => '#10B981', // success
+        'overdue'          => '#EF4444', // danger
     ];
 }
 
@@ -111,22 +151,29 @@ function hex_tint(string $hex, float $colorPct = 0.14): string
 function status_badge_class(string $status): string
 {
     return [
-        'pending'     => 'badge-status pending',
-        'in_progress' => 'badge-status in_progress',
-        'near_due'    => 'badge-status near_due',
-        'completed'   => 'badge-status completed',
-        'overdue'     => 'badge-status overdue',
+        'pending'          => 'badge-status pending',
+        'in_progress'      => 'badge-status in_progress',
+        'near_due'         => 'badge-status near_due',
+        'partial_delivery' => 'badge-status partial_delivery',
+        'delivered'        => 'badge-status delivered',
+        'completed'        => 'badge-status completed',
+        'overdue'          => 'badge-status overdue',
     ][$status] ?? 'badge-status pending';
 }
 
 /**
- * Compute the effective status of a project from its dates.
- * Business rules:
- *   - completed_date set                       -> completed
- *   - not done & due_date < today              -> overdue
- *   - not done & due_date within NEAR_DUE_DAYS  -> near_due
- *   - started (start_date <= today) not done   -> in_progress
- *   - otherwise                                -> pending
+ * Compute the effective status of a project.
+ * Priority order:
+ *   1. completed_date set              -> completed  (manual override, always wins)
+ *   2. all panels delivered            -> delivered
+ *   3. some panels delivered           -> partial_delivery
+ *   4. due_date < today                -> overdue
+ *   5. due_date within NEAR_DUE_DAYS  -> near_due
+ *   6. start_date <= today             -> in_progress
+ *   7. otherwise                       -> pending
+ *
+ * Panel counts (panel_total / panel_delivered) must be pre-joined into $p
+ * by get_projects() / get_project() — defaults to 0 if absent.
  */
 function compute_status(array $p): string
 {
@@ -134,6 +181,18 @@ function compute_status(array $p): string
 
     if (!empty($p['completed_date']) && $p['completed_date'] !== '0000-00-00') {
         return 'completed';
+    }
+
+    $panelTotal     = (int)($p['panel_total']     ?? 0);
+    $panelDelivered = (int)($p['panel_delivered']  ?? 0);
+
+    if ($panelTotal > 0) {
+        if ($panelDelivered >= $panelTotal) {
+            return 'delivered';
+        }
+        if ($panelDelivered > 0) {
+            return 'partial_delivery';
+        }
     }
 
     $due   = !empty($p['due_date'])   ? strtotime($p['due_date'])   : null;
@@ -190,13 +249,29 @@ function days_remaining(array $p): ?int
  *  Data access helpers
  * ==================================================================== */
 
-/** Fetch all projects (joined with dept + responsible person). */
+/** Fetch all projects (joined with dept + responsible person + panel delivery counts). */
 function get_projects(array $filters = []): array
 {
-    $sql = "SELECT p.*, d.name AS department, u.name AS responsible
+    $sql = "SELECT p.*, d.name AS department, u.name AS responsible,
+                   COALESCE(pc.panel_total, 0)     AS panel_total,
+                   COALESCE(pc.panel_delivered, 0) AS panel_delivered
             FROM projects p
             LEFT JOIN departments d ON d.id = p.department_id
-            LEFT JOIN users u       ON u.id = p.responsible_id";
+            LEFT JOIN users u       ON u.id = p.responsible_id
+            LEFT JOIN (
+                SELECT project_id,
+                       COUNT(*) AS panel_total,
+                       SUM(CASE
+                           WHEN status = 'delivered' THEN 1
+                           WHEN actual_delivery_date IS NOT NULL
+                                AND actual_delivery_date <= CURDATE() THEN 1
+                           WHEN status_mode = 'MANUAL'
+                                AND manual_status = 'm_delivered' THEN 1
+                           ELSE 0
+                       END) AS panel_delivered
+                FROM project_panels
+                GROUP BY project_id
+            ) pc ON pc.project_id = p.id";
     $where  = [];
     $params = [];
 
@@ -235,14 +310,30 @@ function get_projects(array $filters = []): array
     return $rows;
 }
 
-/** Fetch a single project by id (with joins). */
+/** Fetch a single project by id (with joins + panel delivery counts). */
 function get_project(int $id): ?array
 {
     $stmt = db()->prepare(
-        "SELECT p.*, d.name AS department, u.name AS responsible
+        "SELECT p.*, d.name AS department, u.name AS responsible,
+                COALESCE(pc.panel_total, 0)     AS panel_total,
+                COALESCE(pc.panel_delivered, 0) AS panel_delivered
          FROM projects p
          LEFT JOIN departments d ON d.id = p.department_id
          LEFT JOIN users u       ON u.id = p.responsible_id
+         LEFT JOIN (
+             SELECT project_id,
+                    COUNT(*) AS panel_total,
+                    SUM(CASE
+                        WHEN status = 'delivered' THEN 1
+                        WHEN actual_delivery_date IS NOT NULL
+                             AND actual_delivery_date <= CURDATE() THEN 1
+                        WHEN status_mode = 'MANUAL'
+                             AND manual_status = 'm_delivered' THEN 1
+                        ELSE 0
+                    END) AS panel_delivered
+             FROM project_panels
+             GROUP BY project_id
+         ) pc ON pc.project_id = p.id
          WHERE p.id = :id"
     );
     $stmt->execute([':id' => $id]);
@@ -320,8 +411,7 @@ function get_project_tasks(int $projectId): array
 function get_project_panels(int $projectId): array
 {
     $stmt = db()->prepare(
-        "SELECT * FROM project_panels WHERE project_id = :id
-         ORDER BY sort_order, id"
+        "SELECT * FROM project_panels WHERE project_id = :id ORDER BY id"
     );
     $stmt->execute([':id' => $projectId]);
     $rows = $stmt->fetchAll();
@@ -329,7 +419,7 @@ function get_project_panels(int $projectId): array
         $r['eff_status'] = compute_panel_status($r);
     }
     unset($r);
-    return $rows;
+    return sort_panels($rows);
 }
 
 /**
@@ -358,8 +448,7 @@ function get_project_panels_by_ids(int $projectId, array $ids): array
     }
     $place = implode(',', array_fill(0, count($ids), '?'));
     $stmt  = db()->prepare(
-        "SELECT * FROM project_panels WHERE project_id = ? AND id IN ($place)
-         ORDER BY sort_order, id"
+        "SELECT * FROM project_panels WHERE project_id = ? AND id IN ($place) ORDER BY id"
     );
     $stmt->execute(array_merge([$projectId], $ids));
     $rows = $stmt->fetchAll();
@@ -367,7 +456,7 @@ function get_project_panels_by_ids(int $projectId, array $ids): array
         $r['eff_status'] = compute_panel_status($r);
     }
     unset($r);
-    return $rows;
+    return sort_panels($rows);
 }
 
 function get_project_milestones(int $projectId): array
@@ -400,17 +489,17 @@ function panel_workflow_statuses(): array
     return ['pending','design','material','production','wiring','qc','ready_delivery','delivered'];
 }
 
-/** All panel statuses (incl. computed overdue) -> Thai labels. */
+/** All panel statuses (incl. computed overdue) -> Thai manufacturing labels. */
 function panel_status_labels(): array
 {
     return [
-        'pending'        => 'รอเริ่ม',
-        'design'         => 'ออกแบบ',
-        'material'       => 'เตรียมอุปกรณ์',
-        'production'     => 'ผลิตโครงตู้',
-        'wiring'         => 'ประกอบ & Wiring',
-        'qc'             => 'ตรวจสอบ QC',
-        'ready_delivery' => 'พร้อมส่ง',
+        'pending'        => 'รอเริ่มงาน',
+        'design'         => 'กำลังเขียนแบบ',
+        'material'       => 'รออุปกรณ์',
+        'production'     => 'กำลังผลิต / ประกอบ',
+        'wiring'         => 'กำลังเดินสาย',
+        'qc'             => 'กำลัง FAT',
+        'ready_delivery' => 'พร้อมส่งมอบ',
         'delivered'      => 'ส่งมอบแล้ว',
         'overdue'        => 'ล่าช้า',
     ];
@@ -418,37 +507,236 @@ function panel_status_labels(): array
 
 function panel_status_colors(): array
 {
-    // Avatar Electric brand status palette (matches the rebrand spec)
     return [
-        'pending'        => '#F59E0B', // Pending
-        'design'         => '#3B82F6', // Engineering
-        'material'       => '#0EA5E9', // Material
-        'production'     => '#FF7A00', // Production (primary orange)
-        'wiring'         => '#8B5CF6', // Wiring
-        'qc'             => '#10B981', // Testing / QC
-        'ready_delivery' => '#059669', // Ready delivery
-        'delivered'      => '#16A34A', // Delivered
-        'overdue'        => '#EF4444', // Overdue
+        'pending'        => '#94A3B8', // Slate    — รอเริ่มงาน
+        'design'         => '#3B82F6', // Blue     — กำลังเขียนแบบ
+        'material'       => '#F59E0B', // Amber    — รออุปกรณ์
+        'production'     => '#FF7A00', // Orange   — กำลังผลิต / ประกอบ (brand)
+        'wiring'         => '#8B5CF6', // Purple   — กำลังเดินสาย
+        'qc'             => '#06B6D4', // Cyan     — กำลัง FAT
+        'ready_delivery' => '#059669', // Emerald  — พร้อมส่งมอบ
+        'delivered'      => '#16A34A', // Green    — ส่งมอบแล้ว
+        'overdue'        => '#EF4444', // Red      — ล่าช้า
     ];
 }
 
-/** status -> standard progress percent. */
+/**
+ * Status → progress percent mapping (Option B).
+ * Statuses omitted from this map (overdue, m_overdue, m_on_hold, m_cancelled)
+ * must NOT change progress — they are intentionally absent.
+ */
 function panel_status_progress_map(): array
 {
     return [
+        // AUTO workflow statuses
         'pending'        => 0,
-        'design'         => 10,
+        'design'         => 15,
         'material'       => 25,
         'production'     => 45,
-        'wiring'         => 65,
+        'wiring'         => 70,
         'qc'             => 85,
         'ready_delivery' => 95,
         'delivered'      => 100,
+        // MANUAL override statuses (m_ prefix)
+        'm_wait_start'   => 0,
+        'm_wait_draw'    => 5,
+        'm_drawing'      => 15,
+        'm_wait_appr'    => 20,
+        'm_wait_mat'     => 25,
+        'm_part_mat'     => 30,
+        'm_mat_rdy'      => 35,
+        'm_fabrication'  => 45,
+        'm_assembly'     => 60,
+        'm_wiring'       => 70,
+        'm_qc'           => 85,
+        'm_fat'          => 90,
+        'm_ready'        => 95,
+        'm_delivered'    => 100,
+        // m_overdue, m_on_hold, m_cancelled → intentionally omitted (no progress change)
     ];
 }
 
-function panel_status_label(string $s): string { return panel_status_labels()[$s] ?? $s; }
-function panel_status_color(string $s): string { return panel_status_colors()[$s] ?? '#6B7280'; }
+/**
+ * 17 manual-override statuses available when status_mode = MANUAL.
+ * Keys use the m_ prefix to avoid collision with AUTO workflow slugs.
+ */
+function manual_status_options(): array
+{
+    return [
+        'm_wait_start'   => 'รอขายรันงานเข้าระบบ',
+        'm_wait_draw'    => 'รอเขียนแบบ',
+        'm_drawing'      => 'กำลังเขียนแบบ',
+        'm_wait_appr'    => 'รออนุมัติแบบ',
+        'm_wait_mat'     => 'รออุปกรณ์เข้า',
+        'm_part_mat'     => 'อุปกรณ์เข้าไม่ครบ',
+        'm_mat_rdy'      => 'อุปกรณ์พร้อมผลิต',
+        'm_fabrication'  => 'กำลังผลิตโครงตู้',
+        'm_assembly'     => 'กำลังประกอบอุปกรณ์',
+        'm_wiring'       => 'กำลังเดินสาย',
+        'm_qc'           => 'กำลังตรวจสอบ QC',
+        'm_fat'          => 'กำลัง FAT',
+        'm_ready'        => 'พร้อมส่งมอบ',
+        'm_delivered'    => 'ส่งมอบแล้ว',
+        'm_overdue'      => 'ล่าช้า',
+        'm_on_hold'      => 'พักงาน',
+        'm_cancelled'    => 'ยกเลิก',
+    ];
+}
+
+function manual_status_color(string $s): string
+{
+    return [
+        'm_wait_start'   => '#6B7280', // gray
+        'm_wait_draw'    => '#94A3B8', // slate (like pending)
+        'm_drawing'      => '#3B82F6', // blue  (like design)
+        'm_wait_appr'    => '#6B7280', // gray
+        'm_wait_mat'     => '#F59E0B', // amber (like material)
+        'm_part_mat'     => '#F59E0B', // amber
+        'm_mat_rdy'      => '#F59E0B', // amber
+        'm_fabrication'  => '#FF7A00', // orange — กำลังผลิตโครงตู้
+        'm_assembly'     => '#8B5CF6', // purple — กำลังประกอบอุปกรณ์
+        'm_wiring'       => '#6366F1', // indigo — กำลังเดินสาย
+        'm_qc'           => '#06B6D4', // cyan   — กำลังตรวจสอบ QC
+        'm_fat'          => '#10B981', // green  — กำลัง FAT
+        'm_ready'        => '#059669', // emerald (like ready_delivery)
+        'm_delivered'    => '#16A34A', // green (like delivered)
+        'm_overdue'      => '#EF4444', // red (like overdue)
+        'm_on_hold'      => '#6B7280', // gray
+        'm_cancelled'    => '#6B7280', // gray
+    ][$s] ?? '#6B7280';
+}
+
+/** Unified label lookup — covers both AUTO workflow slugs and MANUAL m_ slugs. */
+function panel_status_label(string $s): string
+{
+    return panel_status_labels()[$s] ?? manual_status_options()[$s] ?? $s;
+}
+
+/** Unified color lookup — covers both AUTO workflow slugs and MANUAL m_ slugs. */
+function panel_status_color(string $s): string
+{
+    return panel_status_colors()[$s] ?? manual_status_color($s);
+}
+
+/* ======================================================================
+ *  Report: Group & Status color helpers (Project Overview Image)
+ * ==================================================================== */
+
+function report_group_palette(): array
+{
+    return [
+        '#FF7A00', '#2563EB', '#10B981', '#8B5CF6', '#EF4444',
+        '#14B8A6', '#F59E0B', '#6366F1', '#EC4899', '#64748B',
+    ];
+}
+
+/**
+ * Build a stable group → hex color mapping from a panel array.
+ * Named groups A–F get fixed brand colors; extras get auto-palette colors
+ * assigned by ksort discovery order (so the same group always gets the same color).
+ */
+function build_group_color_map(array $panels): array
+{
+    $fixed = [
+        'Group A' => '#FF7A00',
+        'Group B' => '#2563EB',
+        'Group C' => '#10B981',
+        'Group D' => '#8B5CF6',
+        'Group E' => '#EF4444',
+        'Group F' => '#14B8A6',
+    ];
+    $seen = [];
+    foreach ($panels as $pn) {
+        $g = trim((string)($pn['delivery_group'] ?? ''));
+        if ($g !== '' && !isset($seen[$g])) {
+            $seen[$g] = true;
+        }
+    }
+    $palette = report_group_palette();
+    $map = [];
+    foreach (array_keys($seen) as $g) {
+        // Use hash so a group's color stays stable even when other groups are added/removed
+        $map[$g] = $fixed[$g] ?? $palette[abs(crc32($g)) % count($palette)];
+    }
+    return $map;
+}
+
+/** Hex color for a named delivery group (fallback: auto-palette by index). */
+function getGroupColor(string $groupName, int $index = 0): string
+{
+    $fixed = [
+        'Group A' => '#FF7A00',
+        'Group B' => '#2563EB',
+        'Group C' => '#10B981',
+        'Group D' => '#8B5CF6',
+        'Group E' => '#EF4444',
+        'Group F' => '#14B8A6',
+    ];
+    if (isset($fixed[$groupName])) return $fixed[$groupName];
+    $p = report_group_palette();
+    return $p[abs(crc32($groupName)) % count($p)];
+}
+
+/**
+ * Status hex color for report badges — more granular than panel_status_color().
+ * Differentiates กำลังประกอบอุปกรณ์ (Purple) from กำลังเดินสาย (Indigo), etc.
+ */
+function getStatusColor(string $status): string
+{
+    static $map = null;
+    if ($map === null) {
+        $map = [
+            'pending'        => '#94A3B8',
+            'm_wait_start'   => '#94A3B8',
+            'm_wait_draw'    => '#7DD3FC',
+            'design'         => '#3B82F6',
+            'm_drawing'      => '#3B82F6',
+            'm_wait_appr'    => '#60A5FA',
+            'material'       => '#F59E0B',
+            'm_wait_mat'     => '#F59E0B',
+            'm_part_mat'     => '#FB923C',
+            'm_mat_rdy'      => '#F59E0B',
+            'production'     => '#FF7A00',
+            'm_fabrication'  => '#FF7A00',
+            'm_assembly'     => '#8B5CF6', // purple — กำลังประกอบอุปกรณ์
+            'wiring'         => '#8B5CF6', // purple — กำลังเดินสาย (AUTO)
+            'm_wiring'       => '#6366F1', // indigo — กำลังเดินสาย (MANUAL)
+            'qc'             => '#06B6D4', // cyan   — กำลัง FAT (AUTO)
+            'm_qc'           => '#06B6D4', // cyan   — กำลังตรวจสอบ QC
+            'm_fat'          => '#10B981', // green  — กำลัง FAT (MANUAL)
+            'ready_delivery' => '#059669', // emerald — พร้อมส่งมอบ
+            'm_ready'        => '#059669', // emerald
+            'delivered'      => '#16A34A', // green
+            'm_delivered'    => '#16A34A',
+            'overdue'        => '#EF4444',
+            'm_overdue'      => '#EF4444',
+            'm_on_hold'      => '#64748B',
+            'm_cancelled'    => '#374151',
+        ];
+    }
+    return $map[$status] ?? '#94A3B8';
+}
+
+function getStatusLabel(string $status): string
+{
+    return panel_status_label($status);
+}
+
+/** HTML badge for a delivery group (inline-safe, html2canvas-compatible). */
+function getGroupBadge(string $groupName, string $color = '#6B7280'): string
+{
+    $c = htmlspecialchars($color, ENT_QUOTES, 'UTF-8');
+    $n = htmlspecialchars($groupName, ENT_QUOTES, 'UTF-8');
+    return '<span class="rpt-grp-badge" style="background:' . $c . '">' . $n . '</span>';
+}
+
+/** HTML badge for a panel status (inline-safe, html2canvas-compatible). */
+function getStatusBadge(string $status): string
+{
+    $color = getStatusColor($status);
+    $label = htmlspecialchars(getStatusLabel($status), ENT_QUOTES, 'UTF-8');
+    return '<span class="rpt-st-badge" style="background:' . $color . '">' . $label . '</span>';
+}
 
 /** progress percent that corresponds to a workflow status. */
 function panel_progress_for_status(string $status): int
@@ -457,21 +745,39 @@ function panel_progress_for_status(string $status): int
 }
 
 /**
- * Effective (display) status of a panel:
- *   - actual_delivery_date set            -> delivered
- *   - not delivered & target < today      -> overdue
- *   - otherwise                           -> stored workflow status
+ * Effective (display) status of a panel.
+ *
+ * MANUAL mode: returns manual_status directly (user override).
+ * AUTO mode:
+ *   - actual_delivery_date set        -> delivered
+ *   - target < today & not delivered  -> overdue
+ *   - otherwise                       -> stored workflow step (status field)
  */
 function compute_panel_status(array $panel): string
 {
+    if (($panel['status_mode'] ?? 'AUTO') === 'MANUAL') {
+        $ms = $panel['manual_status'] ?? '';
+        return ($ms !== '' && $ms !== null) ? $ms : ($panel['status'] ?? 'pending');
+    }
+    // AUTO logic — cache today per-request to avoid repeated strtotime calls across loops
+    static $today = null;
+    $today ??= strtotime(date('Y-m-d'));
     if (!empty($panel['actual_delivery_date']) && $panel['actual_delivery_date'] !== '0000-00-00') {
-        return 'delivered';
+        // Only treat as delivered if the actual date is today or in the past
+        if (strtotime($panel['actual_delivery_date']) <= $today) {
+            return 'delivered';
+        }
     }
     if (($panel['status'] ?? '') === 'delivered') {
-        return 'delivered';
+        // Delivered via workflow buttons — verify actual date is not future
+        $ado = $panel['actual_delivery_date'] ?? '';
+        if (empty($ado) || $ado === '0000-00-00' || strtotime($ado) <= $today) {
+            return 'delivered';
+        }
+        // actual_delivery_date is in the future — show as ready_delivery instead
+        return 'ready_delivery';
     }
     if (!empty($panel['target_delivery_date']) && $panel['target_delivery_date'] !== '0000-00-00') {
-        $today  = strtotime(date('Y-m-d'));
         $target = strtotime($panel['target_delivery_date']);
         if ($target < $today) {
             return 'overdue';
@@ -489,6 +795,76 @@ function panel_overdue_days(array $panel): int
     $today  = strtotime(date('Y-m-d'));
     $target = strtotime($panel['target_delivery_date']);
     return (int)floor(($today - $target) / 86400);
+}
+
+/* ----- Panel sort helpers ----- */
+
+/**
+ * Convert a delivery group name to a numeric sort key so panels always sort
+ * Group A → B → C … → no-group regardless of how the group is named.
+ *
+ * Supported naming conventions (all map to the same key):
+ *   Single letter        : "A" → 1, "B" → 2
+ *   "Group X" / "Lot X" : "Group A" → 1, "Lot B" → 2
+ *   Pure number          : "1" → 1, "2" → 2
+ *   "Group N" / "Lot N" : "Group 1" → 1, "Lot 3" → 3
+ *   Empty / "—"         : 9999 (always last)
+ */
+function panel_group_sort_key(string $g): int
+{
+    $g = trim($g);
+    // Empty / sentinel "no group" values → always last
+    if ($g === '' || $g === '—' || $g === '-') return 9999;
+    if (in_array(strtolower($g), ['no group', 'none', 'n/a', 'ไม่ระบุ'], true)) return 9999;
+
+    // Pure integer string → use value directly
+    if (ctype_digit($g)) return (int)$g;
+
+    // Single letter A-Z (e.g. "A", "B") → 1-26
+    if (preg_match('/^[A-Za-z]$/u', $g)) return ord(strtoupper($g[0])) - 64;
+
+    // Strip known prefixes (case-insensitive): "Group ", "Lot ", "Phase ", "ชุด", "กลุ่ม"
+    $core = trim((string)preg_replace('/^(?:Group|Lot|Phase|ชุด|กลุ่ม)\s*/iu', '', $g));
+    $hadPrefix = ($core !== $g);
+
+    if ($hadPrefix) {
+        // After prefix stripped: single letter → 1-26
+        if (preg_match('/^[A-Za-z]$/u', $core)) return ord(strtoupper($core[0])) - 64;
+        // Pure number: "Group 1" → 1
+        if (ctype_digit($core)) return (int)$core;
+        // Trailing letter: "Group A1" → last letter
+        if (preg_match('/([A-Za-z])$/u', $core, $m)) return ord(strtoupper($m[1])) - 64;
+        // Trailing number
+        if (preg_match('/(\d+)$/u', $core, $m)) return (int)$m[1];
+    }
+
+    // Unknown format: stable hash 500-998 (after A-Z/1-N, before no-group 9999)
+    return 500 + abs(crc32($g)) % 499;
+}
+
+/**
+ * Sort a panel array consistently across every page:
+ *   1. Delivery group (via panel_group_sort_key)
+ *   2. target_delivery_date ASC (null/empty last within group)
+ *   3. panel_no (natural / human sort)
+ */
+function sort_panels(array $panels): array
+{
+    usort($panels, function (array $a, array $b): int {
+        $ga = panel_group_sort_key(trim((string)($a['delivery_group'] ?? '')));
+        $gb = panel_group_sort_key(trim((string)($b['delivery_group'] ?? '')));
+        if ($ga !== $gb) return $ga <=> $gb;
+
+        $ta = (string)($a['target_delivery_date'] ?? '');
+        $tb = (string)($b['target_delivery_date'] ?? '');
+        $taBlank = ($ta === '' || $ta === '0000-00-00');
+        $tbBlank = ($tb === '' || $tb === '0000-00-00');
+        if ($taBlank !== $tbBlank) return $taBlank ? 1 : -1;
+        if (!$taBlank && $ta !== $tb) return strcmp($ta, $tb);
+
+        return strnatcasecmp((string)($a['panel_no'] ?? ''), (string)($b['panel_no'] ?? ''));
+    });
+    return $panels;
 }
 
 /* ----- Panel data access (with project join, for tracking page) ----- */
@@ -520,7 +896,7 @@ function get_panels(array $filters = []): array
     if ($where) {
         $sql .= ' WHERE ' . implode(' AND ', $where);
     }
-    $sql .= ' ORDER BY p.project_no, pp.sort_order, pp.id';
+    $sql .= ' ORDER BY p.project_no, pp.id';
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
@@ -533,6 +909,26 @@ function get_panels(array $filters = []): array
     if (!empty($filters['status'])) {
         $rows = array_values(array_filter($rows, fn($r) => $r['eff_status'] === $filters['status']));
     }
+
+    // Sort: project_no (natural) → group → delivery date → panel_no
+    usort($rows, function (array $a, array $b): int {
+        $pCmp = strnatcasecmp((string)($a['project_no'] ?? ''), (string)($b['project_no'] ?? ''));
+        if ($pCmp !== 0) return $pCmp;
+
+        $ga = panel_group_sort_key(trim((string)($a['delivery_group'] ?? '')));
+        $gb = panel_group_sort_key(trim((string)($b['delivery_group'] ?? '')));
+        if ($ga !== $gb) return $ga <=> $gb;
+
+        $ta = (string)($a['target_delivery_date'] ?? '');
+        $tb = (string)($b['target_delivery_date'] ?? '');
+        $taBlank = ($ta === '' || $ta === '0000-00-00');
+        $tbBlank = ($tb === '' || $tb === '0000-00-00');
+        if ($taBlank !== $tbBlank) return $taBlank ? 1 : -1;
+        if (!$taBlank && $ta !== $tb) return strcmp($ta, $tb);
+
+        return strnatcasecmp((string)($a['panel_no'] ?? ''), (string)($b['panel_no'] ?? ''));
+    });
+
     return $rows;
 }
 
@@ -585,17 +981,18 @@ function panel_stats(array $panels): array
         $sumProgress += (int)$pn['progress_percent'];
     }
     $total     = count($panels);
-    $delivered = $count['delivered'];
-    $overdue   = $count['overdue'];
-    $producing = $count['design'] + $count['material'] + $count['production']
-               + $count['wiring'] + $count['qc'] + $count['ready_delivery'];
+    $delivered = ($count['delivered'] ?? 0) + ($count['m_delivered'] ?? 0);
+    $overdue   = ($count['overdue']   ?? 0) + ($count['m_overdue']   ?? 0);
+    $notProducing = ['pending','m_wait_start','delivered','m_delivered',
+                     'overdue','m_overdue','m_on_hold','m_cancelled'];
+    $producing = $total - array_sum(array_map(fn($k) => $count[$k] ?? 0, $notProducing));
     return [
         'total'     => $total,
         'count'     => $count,
         'delivered' => $delivered,
         'overdue'   => $overdue,
-        'producing' => $producing,
-        'pending'   => $count['pending'],
+        'producing' => max(0, $producing),
+        'pending'   => ($count['pending'] ?? 0) + ($count['m_wait_start'] ?? 0),
         'overall'   => $total ? (int)round($sumProgress / $total) : 0,
     ];
 }
@@ -626,17 +1023,20 @@ function recompute_project_progress(int $projectId): void
 
 function collect_panel_post(): array
 {
-    $nullable = fn($v) => ($v === '' || $v === null) ? null : $v;
-    $status   = $_POST['status'] ?? 'pending';
-    if (!in_array($status, panel_workflow_statuses(), true)) {
-        $status = 'pending';
+    $nullable  = fn($v) => ($v === '' || $v === null) ? null : $v;
+    $actual    = $nullable($_POST['actual_delivery_date'] ?? '');
+    // actual_delivery_date must be today or past — future dates are not valid for a completed delivery
+    if ($actual !== null && strtotime($actual) > strtotime(date('Y-m-d'))) {
+        $actual = null;
     }
-    $actual = $nullable($_POST['actual_delivery_date'] ?? '');
-    // delivering implies status delivered, and vice-versa keep consistent
-    if ($status === 'delivered' && !$actual) {
-        $actual = date('Y-m-d');
+    $mode      = in_array($_POST['status_mode'] ?? '', ['AUTO','MANUAL'], true)
+                 ? $_POST['status_mode'] : 'AUTO';
+    $manualVal = $nullable($_POST['manual_status'] ?? '');
+    // Validate manual_status against allowed keys
+    if ($manualVal !== null && !array_key_exists($manualVal, manual_status_options())) {
+        $manualVal = null;
     }
-    return [
+    $data = [
         'panel_no'             => trim($_POST['panel_no'] ?? ''),
         'panel_name'           => trim($_POST['panel_name'] ?? ''),
         'panel_type'           => $nullable(trim($_POST['panel_type'] ?? '')),
@@ -644,17 +1044,31 @@ function collect_panel_post(): array
         'delivery_group'       => $nullable(trim($_POST['delivery_group'] ?? '')),
         'target_delivery_date' => $nullable($_POST['target_delivery_date'] ?? ''),
         'actual_delivery_date' => $actual,
-        'status'               => $status,
-        // progress always follows the status map (rule: progress must match status)
-        'progress_percent'     => panel_progress_for_status($status),
+        'status_mode'          => $mode,
+        'manual_status'        => ($mode === 'MANUAL') ? $manualVal : null,
         'responsible'          => $nullable(trim($_POST['responsible'] ?? '')),
         'remark'               => $nullable(trim($_POST['remark'] ?? '')),
         'sort_order'           => (int)($_POST['sort_order'] ?? 0),
+        'progress_percent'     => max(0, min(100, (int)($_POST['progress_percent'] ?? 0))),
     ];
+    // Auto-stamp delivered only when actual date is today or already past
+    // Progress is NOT forced — stays whatever the user set
+    if ($actual && strtotime($actual) <= strtotime(date('Y-m-d'))) {
+        $data['status']      = 'delivered';
+        $data['status_mode'] = 'AUTO'; // delivered via actual date overrides mode
+    }
+    return $data;
 }
 
 function create_panel(int $projectId, array $data): int
 {
+    // New panels start at รอเริ่มงาน unless actual delivery date was provided
+    if (!isset($data['status'])) {
+        $data['status'] = 'pending';
+    }
+    if (!isset($data['progress_percent'])) {
+        $data['progress_percent'] = 0;
+    }
     $data['project_id'] = $projectId;
     $cols  = array_keys($data);
     $place = array_map(fn($c) => ':' . $c, $cols);
@@ -677,7 +1091,9 @@ function update_panel(int $id, array $data): void
         $params[':' . $k] = $v;
     }
     db()->prepare('UPDATE project_panels SET ' . implode(',', $sets) . ' WHERE id = :id')->execute($params);
-    $pid = (int)(db()->query("SELECT project_id FROM project_panels WHERE id = " . (int)$id)->fetchColumn());
+    $pidSt = db()->prepare("SELECT project_id FROM project_panels WHERE id = :id");
+    $pidSt->execute([':id' => $id]);
+    $pid = (int)$pidSt->fetchColumn();
     recompute_project_progress($pid);
     log_activity($pid, 'panel_edit', 'แก้ไขตู้ ' . ($data['panel_no'] ?? ''));
 }
@@ -687,26 +1103,38 @@ function set_panel_status(int $id, string $status): void
     if (!in_array($status, panel_workflow_statuses(), true)) {
         return;
     }
-    $progress = panel_progress_for_status($status);
-    $actualSql = '';
-    if ($status === 'delivered') {
-        // stamp actual delivery date if not already set
-        $actualSql = ', actual_delivery_date = COALESCE(actual_delivery_date, CURDATE())';
-    }
-    db()->prepare(
-        "UPDATE project_panels
-         SET status = :s, progress_percent = :p $actualSql
-         WHERE id = :id"
-    )->execute([':s' => $status, ':p' => $progress, ':id' => $id]);
+    $params     = [':s' => $status, ':id' => $id];
+    $extraSql   = '';
 
-    $pid = (int)(db()->query("SELECT project_id FROM project_panels WHERE id = " . (int)$id)->fetchColumn());
+    // Auto-stamp actual delivery date when marking as delivered
+    if ($status === 'delivered') {
+        $extraSql .= ', actual_delivery_date = COALESCE(actual_delivery_date, CURDATE())';
+    }
+
+    // Update progress_percent from mapping (Option B).
+    // Statuses absent from the map (overdue etc.) keep current progress.
+    $progressMap = panel_status_progress_map();
+    if (array_key_exists($status, $progressMap)) {
+        $extraSql .= ', progress_percent = :prog';
+        $params[':prog'] = $progressMap[$status];
+    }
+
+    db()->prepare(
+        "UPDATE project_panels SET status = :s $extraSql WHERE id = :id"
+    )->execute($params);
+
+    $pidSt2 = db()->prepare("SELECT project_id FROM project_panels WHERE id = :id");
+    $pidSt2->execute([':id' => $id]);
+    $pid = (int)$pidSt2->fetchColumn();
     recompute_project_progress($pid);
     log_activity($pid, 'panel_status', 'อัปเดตสถานะตู้ -> ' . $status);
 }
 
 function delete_panel(int $id): void
 {
-    $row = db()->query("SELECT project_id, panel_no FROM project_panels WHERE id = " . (int)$id)->fetch();
+    $delSt = db()->prepare("SELECT project_id, panel_no FROM project_panels WHERE id = :id");
+    $delSt->execute([':id' => $id]);
+    $row = $delSt->fetch();
     if (!$row) return;
     db()->prepare("DELETE FROM project_panels WHERE id = :id")->execute([':id' => $id]);
     recompute_project_progress((int)$row['project_id']);
@@ -750,8 +1178,10 @@ function build_timeline(array $project, array $tasks): array
 
     $bars = [];
     foreach ($tasks as $t) {
+        if (empty($t['start_date']) || empty($t['end_date'])) continue;
         $ts0 = strtotime($t['start_date']);
         $ts1 = strtotime($t['end_date']);
+        if (!$ts0 || !$ts1) continue; // reject '0000-00-00' or unparseable strings
         if ($ts1 < $ts0) { $ts1 = $ts0; }
         $left  = $pos($ts0);
         $right = $pos($ts1);
@@ -872,6 +1302,7 @@ function delete_project(int $id): void
     $stmt = db()->prepare('SELECT project_no FROM projects WHERE id = :id');
     $stmt->execute([':id' => $id]);
     $no = $stmt->fetchColumn();
+    db()->prepare('DELETE FROM activity_logs WHERE project_id = :id')->execute([':id' => $id]);
     db()->prepare('DELETE FROM projects WHERE id = :id')->execute([':id' => $id]);
     log_activity(null, 'delete', 'ลบโครงการ ' . $no);
 }
@@ -905,11 +1336,12 @@ function log_activity(?int $projectId, string $action, string $detail = '', stri
 function render_header(string $title = '', string $active = ''): void
 {
     $nav = [
-        'index.php'       => ['ภาพรวม Dashboard', 'bi-speedometer2'],
-        'projects.php'    => ['รายการ Project', 'bi-folder2-open'],
-        'panels.php'      => ['ติดตามรายตู้ (Panel)', 'bi-hdd-stack'],
-        'project_add.php' => ['เพิ่ม Project', 'bi-plus-circle'],
-        'print_report.php'=> ['รายงานผู้บริหาร', 'bi-printer'],
+        'index.php'       => ['ภาพรวม Dashboard',   'bi-speedometer2'],
+        'projects.php'    => ['รายการ Project',      'bi-folder2-open'],
+        'panels.php'      => ['ติดตามรายตู้',        'bi-hdd-stack'],
+        'deliveries.php'  => ['ติดตามการส่งมอบ',    'bi-truck'],
+        'reports.php'     => ['รายงาน',             'bi-file-earmark-bar-graph'],
+        'settings.php'    => ['ตั้งค่าระบบ',         'bi-gear'],
     ];
     ?>
 <!doctype html>
@@ -957,7 +1389,7 @@ function render_header(string $title = '', string $active = ''): void
       <div class="topbar-right">
         <div class="data-date">
           <i class="bi bi-calendar3"></i>
-          ข้อมูล ณ วันที่ <?= e(format_date(date('Y-m-d'))) ?>
+          ข้อมูล ณ วันที่ <?= e(format_date_dmy(date('Y-m-d'))) ?>
         </div>
         <div class="user-chip"><i class="bi bi-person-circle"></i> ผู้ดูแลระบบ</div>
       </div>

@@ -31,9 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $p = array_merge($p, $data);
 }
 
-$departments = get_departments();
-$users       = get_users();
-$isEdit      = false;
+$isEdit = false;
 
 render_header('เพิ่มโครงการใหม่', 'project_add.php');
 ?>

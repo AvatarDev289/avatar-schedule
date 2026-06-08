@@ -40,9 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $p = array_merge($p, $data);
 }
 
-$departments = get_departments();
-$users       = get_users();
-$isEdit      = true;
+$isEdit          = true;
+$panelProgExists = (project_progress_from_panels($id) !== null);
 
 render_header('แก้ไขโครงการ ' . $p['project_no'], 'projects.php');
 ?>

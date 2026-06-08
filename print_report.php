@@ -70,7 +70,7 @@ $fragment = !empty($_GET['fragment']); // SPA fragment mode — skip HTML wrappe
 <div class="rep-head">
   <div>
     <h1><?= $single ? 'รายงานรายละเอียดโครงการ' : 'รายงานสรุปแผนงานโครงการ' ?></h1>
-    <div class="sub">Schedule of Project Report — ข้อมูล ณ วันที่ <?= e(format_date(date('Y-m-d'))) ?></div>
+    <div class="sub">Schedule of Project Report — ข้อมูล ณ วันที่ <?= e(format_date_dmy(date('Y-m-d'))) ?></div>
   </div>
   <div class="company">
     <div class="name">AVATAR ELECTRIC</div>
@@ -94,10 +94,10 @@ $fragment = !empty($_GET['fragment']); // SPA fragment mode — skip HTML wrappe
       <td><span class="dl">มูลค่างาน</span><br><span class="dv"><?= money2($p['amount']) ?> บาท</span></td>
     </tr>
     <tr>
-      <td><span class="dl">วันเริ่ม</span><br><span class="dv"><?= e(format_date($p['start_date'])) ?></span></td>
-      <td><span class="dl">กำหนดส่ง</span><br><span class="dv"><?= e(format_date($p['due_date'])) ?></span></td>
-      <td><span class="dl">วันส่งมอบ</span><br><span class="dv"><?= e(format_date($p['delivery_date'])) ?></span></td>
-      <td><span class="dl">วันเสร็จ</span><br><span class="dv"><?= e(format_date($p['completed_date'])) ?></span></td>
+      <td><span class="dl">วันเริ่ม</span><br><span class="dv"><?= e(format_date_dmy($p['start_date'])) ?></span></td>
+      <td><span class="dl">กำหนดส่ง</span><br><span class="dv"><?= e(format_date_dmy($p['due_date'])) ?></span></td>
+      <td><span class="dl">วันส่งมอบ</span><br><span class="dv"><?= e(format_date_dmy($p['delivery_date'])) ?></span></td>
+      <td><span class="dl">วันเสร็จ</span><br><span class="dv"><?= e(format_date_dmy($p['completed_date'])) ?></span></td>
     </tr>
   </table>
   <p style="margin-top:14px"><span class="dl">รายละเอียดงาน</span><br><?= nl2br(e($p['description'] ?: '-')) ?></p>
@@ -128,7 +128,7 @@ $fragment = !empty($_GET['fragment']); // SPA fragment mode — skip HTML wrappe
         <td><?= $i++ ?></td>
         <td><?= e($p['project_no']) ?></td>
         <td><strong><?= e($p['project_name']) ?></strong><br><span class="dl"><?= e($p['customer']) ?></span></td>
-        <td><?= e(format_date($p['due_date'])) ?></td>
+        <td><?= e(format_date_dmy($p['due_date'])) ?></td>
         <td class="text-center"><?= (int)$p['progress'] ?>%</td>
         <td class="text-end"><?= money($p['amount']) ?></td>
         <td><span class="badge" style="background:<?= status_color($st) ?>"><?= e(status_label($st)) ?></span></td>

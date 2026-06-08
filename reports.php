@@ -1,11 +1,13 @@
 <?php
 /**
- * pages/reports.php — Reports hub fragment
+ * reports.php — Reports hub (Classic multi-page)
  */
-require_once __DIR__ . '/../functions.php';
+require_once __DIR__ . '/functions.php';
 
 $projects = get_projects();
 $filters  = status_labels();
+
+render_header('รายงาน', 'reports.php');
 ?>
 
 <div class="panel mb-4">
@@ -16,6 +18,7 @@ $filters  = status_labels();
 </div>
 
 <div class="grid-3 mb-4">
+
   <!-- Overview Image Report -->
   <div class="panel" style="border-top:3px solid var(--primary-color)">
     <div class="panel-body">
@@ -33,13 +36,13 @@ $filters  = status_labels();
       <select id="reportProjectSel" class="form-select form-select-sm mb-2">
         <option value="">— เลือกโครงการ —</option>
         <?php foreach ($projects as $p): ?>
-          <option value="<?= (int)$p['id'] ?>"><?= e($p['project_no']) ?> — <?= e(mb_substr($p['project_name'],0,30)) ?></option>
+          <option value="<?= (int)$p['id'] ?>"><?= e($p['project_no']) ?> — <?= e(mb_substr($p['project_name'], 0, 30)) ?></option>
         <?php endforeach; ?>
       </select>
       <button class="btn btn-primary w-100" onclick="
         var v = document.getElementById('reportProjectSel').value;
-        if (!v) { SPA.toast('กรุณาเลือกโครงการ','warning'); return; }
-        SPA.go('/reports/select/'+v);
+        if (!v) { alert('กรุณาเลือกโครงการ'); return; }
+        location.href = 'project_report_select.php?project_id=' + v;
       ">
         <i class="bi bi-sliders me-1"></i> เลือกขอบเขตรายงาน
       </button>
@@ -63,13 +66,12 @@ $filters  = status_labels();
       <select id="printProjectSel" class="form-select form-select-sm mb-2">
         <option value="">ทุกโครงการ</option>
         <?php foreach ($projects as $p): ?>
-          <option value="<?= (int)$p['id'] ?>"><?= e($p['project_no']) ?> — <?= e(mb_substr($p['project_name'],0,30)) ?></option>
+          <option value="<?= (int)$p['id'] ?>"><?= e($p['project_no']) ?> — <?= e(mb_substr($p['project_name'], 0, 30)) ?></option>
         <?php endforeach; ?>
       </select>
       <button class="btn w-100" style="background:var(--info-color);color:#fff" onclick="
         var v = document.getElementById('printProjectSel').value;
-        var url = 'print_report.php?' + (v ? 'id='+v : '') + '&fragment=1';
-        SPA.loadFullscreen(url, 'รายงานผู้บริหาร');
+        window.open('print_report.php' + (v ? '?id=' + v : ''), '_blank');
       ">
         <i class="bi bi-printer me-1"></i> ดูรายงาน
       </button>
@@ -104,6 +106,7 @@ $filters  = status_labels();
       </a>
     </div>
   </div>
+
 </div>
 
 <!-- Quick project links -->
@@ -114,17 +117,17 @@ $filters  = status_labels();
       <table class="table table-hover align-middle mb-0">
         <thead>
           <tr>
-            <th>Project No.</th><th>ชื่อโครงการ</th><th class="text-center" style="width:140px">คืบหน้า</th>
+            <th>Project No.</th><th>ชื่อโครงการ</th>
+            <th class="text-center" style="width:140px">คืบหน้า</th>
             <th>สถานะ</th><th class="text-center">รายงาน</th>
           </tr>
         </thead>
         <tbody>
-          <?php foreach ($projects as $p):
-              $st = $p['effective_status']; ?>
+          <?php foreach ($projects as $p): $st = $p['effective_status']; ?>
             <tr>
               <td class="fw-600"><?= e($p['project_no']) ?></td>
               <td>
-                <a href="#/projects/view/<?= (int)$p['id'] ?>" class="link-title"><?= e($p['project_name']) ?></a>
+                <a href="project_view.php?id=<?= (int)$p['id'] ?>" class="link-title"><?= e($p['project_name']) ?></a>
                 <div class="text-muted small"><?= e($p['customer']) ?></div>
               </td>
               <td class="text-center">
@@ -135,12 +138,11 @@ $filters  = status_labels();
               </td>
               <td><span class="<?= status_badge_class($st) ?>"><?= e(status_label($st)) ?></span></td>
               <td class="text-center text-nowrap">
-                <a href="#/reports/select/<?= (int)$p['id'] ?>" class="btn btn-sm btn-primary" title="Overview Report">
+                <a href="project_report_select.php?project_id=<?= (int)$p['id'] ?>" class="btn btn-sm btn-primary" title="Overview Report">
                   <i class="bi bi-image"></i>
                 </a>
-                <a href="#" class="btn btn-sm btn-outline-secondary ms-1"
-                   data-spa-fullscreen="print_report.php?id=<?= (int)$p['id'] ?>&fragment=1"
-                   data-spa-title="รายงาน <?= e($p['project_no']) ?>">
+                <a href="print_report.php?id=<?= (int)$p['id'] ?>" target="_blank"
+                   class="btn btn-sm btn-outline-secondary ms-1" title="พิมพ์รายงาน">
                   <i class="bi bi-printer"></i>
                 </a>
                 <a href="export_excel.php" class="btn btn-sm btn-outline-success ms-1" title="Excel">
@@ -154,3 +156,5 @@ $filters  = status_labels();
     </div>
   </div>
 </div>
+
+<?php render_footer(); ?>

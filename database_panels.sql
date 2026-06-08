@@ -34,6 +34,8 @@ CREATE TABLE `project_panels` (
     'delivered',
     'overdue'
   ) DEFAULT 'pending',
+  `status_mode`           ENUM('AUTO','MANUAL') NOT NULL DEFAULT 'AUTO',
+  `manual_status`         VARCHAR(80) NULL DEFAULT NULL,
   `progress_percent`      INT DEFAULT 0,
   `responsible`           VARCHAR(100),
   `remark`                TEXT,

@@ -36,7 +36,7 @@ echo "\xEF\xBB\xBF";
 <body>
 <table>
   <tr><td colspan="13" class="title">Avatar Electric — รายงานโครงการ (Schedule of Project)</td></tr>
-  <tr><td colspan="13">ข้อมูล ณ วันที่ <?= e(format_date(date('Y-m-d'))) ?> | จำนวน <?= count($projects) ?> โครงการ</td></tr>
+  <tr><td colspan="13">ข้อมูล ณ วันที่ <?= e(format_date_dmy(date('Y-m-d'))) ?> | จำนวน <?= count($projects) ?> โครงการ</td></tr>
   <tr></tr>
   <tr>
     <th>#</th>
@@ -61,10 +61,10 @@ echo "\xEF\xBB\xBF";
     <td><?= e($p['customer']) ?></td>
     <td><?= e($p['department']) ?></td>
     <td><?= e($p['responsible']) ?></td>
-    <td><?= e(format_date($p['start_date'])) ?></td>
-    <td><?= e(format_date($p['due_date'])) ?></td>
-    <td><?= e(format_date($p['delivery_date'])) ?></td>
-    <td><?= e(format_date($p['completed_date'])) ?></td>
+    <td><?= e(format_date_dmy($p['start_date'])) ?></td>
+    <td><?= e(format_date_dmy($p['due_date'])) ?></td>
+    <td><?= e(format_date_dmy($p['delivery_date'])) ?></td>
+    <td><?= e(format_date_dmy($p['completed_date'])) ?></td>
     <td><?= (int)$p['progress'] ?></td>
     <td class="num"><?= money($p['amount']) ?></td>
     <td><?= e(status_label($p['effective_status'])) ?></td>

@@ -15,6 +15,28 @@
   --line:#E5E7EB;
   --muted:#6B7280;
   --text:#333333;
+
+  /* Delivery group palette */
+  --group-a:#FF7A00;
+  --group-b:#2563EB;
+  --group-c:#10B981;
+  --group-d:#8B5CF6;
+  --group-e:#EF4444;
+  --group-f:#14B8A6;
+
+  /* Status colors (granular — more detailed than project-level) */
+  --status-pending:#94A3B8;
+  --status-design:#3B82F6;
+  --status-material:#F59E0B;
+  --status-production:#FF7A00;
+  --status-assembly:#8B5CF6;
+  --status-wiring:#6366F1;
+  --status-qc:#06B6D4;
+  --status-ready:#1D4ED8;
+  --status-delivered:#10B981;
+  --status-overdue:#EF4444;
+  --status-on-hold:#64748B;
+  --status-cancelled:#374151;
 }
 *{ box-sizing:border-box; }
 body{
@@ -207,6 +229,44 @@ body{
   margin-top:auto; display:flex; justify-content:space-between; align-items:center;
   border-top:2px solid var(--primary-color); padding:12px 8px 4px; font-size:13.5px; color:var(--muted);
 }
+
+/* ---------- Report badges (html2canvas-safe: solid bg, no filter) ---------- */
+.rpt-grp-badge{
+  display:inline-block; color:#fff; font-size:11px; font-weight:700;
+  padding:2px 9px; border-radius:12px; white-space:nowrap; line-height:1.5;
+}
+.rpt-st-badge{
+  display:inline-block; color:#fff; font-size:11px; font-weight:700;
+  padding:2px 9px; border-radius:12px; white-space:nowrap; line-height:1.5;
+}
+
+/* ---------- Legend strip ---------- */
+.rpt-legend{
+  display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;
+  background:#F8FAFC; border:1px solid #E2E8F0; border-radius:10px; padding:10px 18px;
+}
+.legend-section{ display:flex; flex-direction:column; gap:6px; }
+.legend-title{
+  font-size:10px; font-weight:700; color:#94A3B8;
+  text-transform:uppercase; letter-spacing:.5px;
+}
+.legend-items{ display:flex; flex-wrap:wrap; gap:8px 18px; }
+.legend-item{ display:flex; align-items:center; gap:6px; }
+.legend-dot{ display:inline-block; width:12px; height:12px; border-radius:3px; flex-shrink:0; }
+.legend-label{ font-size:12px; color:#374151; }
+
+/* ---------- Color mode toggle (toolbar only — not exported) ---------- */
+.color-mode-wrap{
+  display:flex; background:#374151; border-radius:8px; padding:3px; gap:3px; align-items:center;
+}
+.color-mode-btn{
+  background:transparent; border:none; color:#9CA3AF;
+  font-size:12px; padding:5px 12px; border-radius:6px;
+  cursor:pointer; white-space:nowrap; font-family:inherit;
+  transition:background .15s, color .15s;
+}
+.color-mode-btn.active{ background:var(--primary-color); color:#fff; font-weight:600; }
+.color-mode-btn i{ margin-right:4px; }
 
 /* ---------- Print ---------- */
 @media print{

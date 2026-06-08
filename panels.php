@@ -125,23 +125,40 @@ render_header('ติดตามสถานะรายตู้ (Panel Tracki
                   <div class="text-muted small"><?= e($pn['panel_type']) ?></div>
                 </td>
                 <td><?php if ($pn['delivery_group']): ?><span class="grp-badge"><?= e($pn['delivery_group']) ?></span><?php else: ?>-<?php endif; ?></td>
-                <td class="small"><?= e(format_date($pn['target_delivery_date'])) ?>
+                <td class="small"><?= e(format_date_dmy($pn['target_delivery_date'])) ?>
                   <?php if ($ovd>0): ?><span class="badge bg-danger ms-1">เลย <?= $ovd ?>ว</span><?php endif; ?></td>
                 <td>
                   <div class="progress-mini"><div class="bar" style="width:<?= (int)$pn['progress_percent'] ?>%;background:<?= panel_status_color($es) ?>"></div></div>
                   <span class="small text-muted"><?= (int)$pn['progress_percent'] ?>%</span>
                 </td>
                 <td>
-                  <form method="post" action="panel_update_status.php" class="d-flex gap-1 panel-status-form">
-                    <input type="hidden" name="id" value="<?= (int)$pn['id'] ?>">
-                    <input type="hidden" name="return" value="<?= e($returnUrl) ?>">
+                  <?php
+                    $mode  = $pn['status_mode'] ?? 'AUTO';
+                    $wf    = panel_workflow_statuses();
+                    $dbIdx = ($k = array_search($pn['status'] ?? 'pending', $wf)) !== false ? $k : 0;
+                    $prevS = $dbIdx > 0 ? $wf[$dbIdx - 1] : null;
+                    $nextS = $dbIdx < count($wf) - 1 ? $wf[$dbIdx + 1] : null;
+                    $sUrl  = fn($s) => 'panel_update_status.php?id=' . (int)$pn['id'] . '&status=' . urlencode($s) . '&return=' . urlencode($returnUrl);
+                  ?>
+                  <div class="d-flex align-items-center gap-1 flex-nowrap">
+                    <?php if ($mode === 'AUTO'): ?>
+                      <?php if ($prevS): ?>
+                        <a href="<?= e($sUrl($prevS)) ?>" class="btn btn-sm btn-outline-secondary py-0 px-1" title="<?= e(panel_status_label($prevS)) ?>">‹</a>
+                      <?php else: ?>
+                        <span class="btn btn-sm btn-light py-0 px-1" style="opacity:.25;cursor:default">‹</span>
+                      <?php endif; ?>
+                    <?php endif; ?>
                     <span class="status-pill" style="background:<?= panel_status_color($es) ?>"><?= e(panel_status_label($es)) ?></span>
-                    <select name="status" class="form-select form-select-sm status-select" onchange="this.form.submit()">
-                      <?php foreach (panel_workflow_statuses() as $ws): ?>
-                        <option value="<?= e($ws) ?>" <?= $pn['status']===$ws?'selected':'' ?>><?= e(panel_status_label($ws)) ?></option>
-                      <?php endforeach; ?>
-                    </select>
-                  </form>
+                    <?php if ($mode === 'MANUAL'): ?>
+                      <span class="badge" style="background:#6B7280;font-size:10px;padding:2px 5px" title="Manual Override">M</span>
+                    <?php else: ?>
+                      <?php if ($nextS): ?>
+                        <a href="<?= e($sUrl($nextS)) ?>" class="btn btn-sm btn-success py-0 px-1" title="<?= e(panel_status_label($nextS)) ?>">›</a>
+                      <?php else: ?>
+                        <span class="btn btn-sm btn-light py-0 px-1" style="opacity:.25;cursor:default">›</span>
+                      <?php endif; ?>
+                    <?php endif; ?>
+                  </div>
                 </td>
                 <td class="small"><?= e($pn['responsible'] ?: '-') ?></td>
               </tr>

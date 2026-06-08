@@ -13,7 +13,7 @@ date_default_timezone_set('Asia/Bangkok');
 // ---- Database configuration --------------------------------------------
 define('DB_HOST', '127.0.0.1');
 define('DB_PORT', '3306');
-define('DB_NAME', 'avatar_schedule');
+define('DB_NAME', 'appavata_schedule');
 define('DB_USER', 'root');     // XAMPP default
 define('DB_PASS', '');         // XAMPP default (empty)
 define('DB_CHARSET', 'utf8mb4');

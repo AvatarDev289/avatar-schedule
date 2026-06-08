@@ -169,7 +169,7 @@ render_header('เลือกขอบเขตรายงาน — ' . $proj
                 <td><?= e($pn['panel_name']) ?></td>
                 <td class="small"><?= e($pn['panel_type'] ?: '-') ?></td>
                 <td><?php if ($pn['delivery_group']): ?><span class="grp-badge"><?= e($pn['delivery_group']) ?></span><?php else: ?>-<?php endif; ?></td>
-                <td class="small"><?= e(format_date($pn['target_delivery_date'])) ?></td>
+                <td class="small"><?= e(format_date_dmy($pn['target_delivery_date'])) ?></td>
                 <td>
                   <div class="progress-mini"><div class="bar" style="width:<?= (int)$pn['progress_percent'] ?>%;background:<?= panel_status_color($es) ?>"></div></div>
                   <span class="small text-muted"><?= (int)$pn['progress_percent'] ?>%</span>
