@@ -71,12 +71,14 @@ if ($scope === 'all') {
     $tasks = get_project_tasks($id);
     // Normalize DB task fields → end_date + progress so build_timeline() can use them
     foreach ($tasks as &$t) {
-        if (!isset($t['end_date']))  $t['end_date']  = $t['due_date'] ?? null;
-        if (!isset($t['progress']))  $t['progress']  = (int)($t['progress_percent'] ?? 0);
+        if (!isset($t['end_date'])) $t['end_date'] = $t['due_date'] ?? null;
+        // Use status-based progress: pending=0, in_progress=50, completed=100
+        $tSt = $t['status'] ?? 'pending';
+        $t['progress'] = task_status_to_progress($tSt === 'overdue' ? 'in_progress' : $tSt);
         if (!isset($t['color'])) {
-            $sc = ['completed' => '#16A34A', 'in_progress' => '#3B82F6',
+            $sc = ['completed' => '#16A34A', 'in_progress' => '#FF7A00',
                    'overdue' => '#EF4444', 'cancelled' => '#6B7280'];
-            $t['color'] = $sc[$t['status'] ?? ''] ?? '#F59E0B';
+            $t['color'] = $sc[$tSt] ?? '#94A3B8';
         }
     }
     unset($t);

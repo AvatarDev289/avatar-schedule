@@ -71,6 +71,17 @@ render_header('ตั้งค่าระบบ', 'settings.php');
 
 </div>
 
+<!-- Task Templates link -->
+<div class="panel mt-3">
+  <div class="panel-head"><i class="bi bi-list-check"></i> Task Templates</div>
+  <div class="panel-body">
+    <p class="text-muted small mb-2">จัดการ Template ขั้นตอนงาน (Task Templates) — ใช้สร้าง Tasks อัตโนมัติเมื่อเพิ่ม/แก้ไขตู้</p>
+    <a href="task_templates.php" class="btn btn-primary">
+      <i class="bi bi-gear-wide-connected me-1"></i> จัดการ Task Templates
+    </a>
+  </div>
+</div>
+
 <!-- Quick actions -->
 <div class="panel mt-3">
   <div class="panel-head"><i class="bi bi-gear-wide-connected"></i> การดำเนินการด่วน</div>

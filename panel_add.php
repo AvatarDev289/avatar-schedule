@@ -23,8 +23,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($data['panel_name'] === '') $errors[] = 'กรุณากรอกชื่อตู้';
 
     if (!$errors) {
-        create_panel($projectId, $data);
-        header('Location: project_view.php?id=' . $projectId . '&msg=' . rawurlencode('เพิ่มตู้เรียบร้อยแล้ว') . '#panels');
+        $panelId = create_panel($projectId, $data);
+
+        $msg = 'เพิ่มตู้เรียบร้อยแล้ว';
+        if (!empty($_POST['auto_tasks'])) {
+            $tpl       = trim($_POST['task_template'] ?? 'auto');
+            $startDate = $data['planned_start_date'] ?? date('Y-m-d');
+
+            if (str_starts_with($tpl, 'db:')) {
+                $dbTid = (int)substr($tpl, 3);
+                [$created] = create_tasks_from_db_template($projectId, $panelId, $dbTid, $startDate);
+            } elseif ($tpl === 'auto') {
+                // Auto-detect DB template by panel_type
+                $dbTid = resolve_db_template($data['panel_type'] ?? '');
+                if ($dbTid) {
+                    [$created] = create_tasks_from_db_template($projectId, $panelId, $dbTid, $startDate);
+                } else {
+                    $created = create_panel_auto_tasks($projectId, $panelId, 'auto');
+                }
+            } else {
+                $created = create_panel_auto_tasks($projectId, $panelId, $tpl);
+            }
+
+            if (($created ?? 0) > 0) {
+                $msg = 'เพิ่มตู้และสร้าง ' . $created . ' ขั้นตอนงานอัตโนมัติแล้ว';
+            }
+        }
+
+        header('Location: project_view.php?id=' . $projectId
+               . '&msg=' . rawurlencode($msg)
+               . '&open_panel=' . $panelId . '#panels');
         exit;
     }
     $pn = array_merge($pn, $data);

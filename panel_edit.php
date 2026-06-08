@@ -24,7 +24,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         update_panel($id, $data);
-        header('Location: project_view.php?id=' . (int)$pn['project_id'] . '&msg=' . rawurlencode('บันทึกการแก้ไขตู้แล้ว') . '#panels');
+
+        $msg = 'บันทึกการแก้ไขตู้แล้ว';
+        if (!empty($_POST['auto_tasks'])) {
+            $tpl            = trim($_POST['task_template'] ?? 'auto');
+            $conflictAction = $_POST['conflict_action'] ?? 'add_missing';
+            $existing       = count_panel_tasks($id);
+            $startDate      = $data['planned_start_date'] ?? $pn['planned_start_date'] ?? date('Y-m-d');
+            $projId         = (int)$pn['project_id'];
+            $panelType      = $data['panel_type'] ?? $pn['panel_type'] ?? '';
+
+            // Resolve DB template ID
+            $dbTid = null;
+            if (str_starts_with($tpl, 'db:')) {
+                $dbTid = (int)substr($tpl, 3);
+            } elseif ($tpl === 'auto') {
+                $dbTid = resolve_db_template($panelType);
+            }
+
+            if ($conflictAction === 'skip' && $existing > 0) {
+                // do nothing
+            } elseif ($existing > 0 && $conflictAction === 'replace') {
+                delete_panel_tasks($id);
+                if ($dbTid) {
+                    [$created] = create_tasks_from_db_template($projId, $id, $dbTid, $startDate);
+                } else {
+                    $created = create_panel_auto_tasks($projId, $id, $tpl);
+                }
+                $msg = 'แก้ไขตู้และสร้าง ' . ($created ?? 0) . ' ขั้นตอนใหม่ (แทนที่ของเดิม)';
+            } elseif ($existing > 0 && $conflictAction === 'add_missing') {
+                if ($dbTid) {
+                    [$created, $skipped] = create_tasks_from_db_template($projId, $id, $dbTid, $startDate, skipExisting: true);
+                } else {
+                    $created = create_panel_auto_tasks($projId, $id, $tpl, skipExisting: true);
+                }
+                $msg = 'แก้ไขตู้' . (($created ?? 0) > 0 ? ' และเพิ่ม ' . $created . ' ขั้นตอนที่ยังขาด' : ' (ไม่มีขั้นตอนใหม่ที่ต้องเพิ่ม)');
+            } else {
+                // No existing tasks
+                if ($dbTid) {
+                    [$created] = create_tasks_from_db_template($projId, $id, $dbTid, $startDate);
+                } else {
+                    $created = create_panel_auto_tasks($projId, $id, $tpl);
+                }
+                $msg = 'แก้ไขตู้และสร้าง ' . ($created ?? 0) . ' ขั้นตอนงานอัตโนมัติ';
+            }
+        }
+
+        header('Location: project_view.php?id=' . (int)$pn['project_id']
+               . '&msg=' . rawurlencode($msg)
+               . '&open_panel=' . $id . '#panels');
         exit;
     }
     $pn = array_merge($pn, $data);

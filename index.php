@@ -5,11 +5,12 @@
  */
 require_once __DIR__ . '/functions.php';
 
-$projects = get_projects();
-$stats    = dashboard_stats($projects);
-$perMonth = projects_per_month($projects);
-$labels   = status_labels();
-$colors   = status_colors();
+$projects  = get_projects();
+$stats     = dashboard_stats($projects);
+$perMonth  = projects_per_month($projects);
+$labels    = status_labels();
+$colors    = status_colors();
+$lateStats = get_late_stats();
 
 // Panel tracking summary (all cabinets across all projects)
 $allPanels   = get_panels();
@@ -53,6 +54,23 @@ render_header('ภาพรวม Dashboard', 'index.php');
     </a>
   <?php endforeach; ?>
 </div>
+
+<!-- Late Stats bar -->
+<?php if ($lateStats['late_tasks'] > 0 || $lateStats['late_cabinets'] > 0): ?>
+<div class="alert alert-danger d-flex align-items-center gap-4 flex-wrap py-2 mb-3" style="border-left:4px solid #EF4444">
+  <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>รายการล่าช้า</strong>
+  <span>
+    <span class="badge bg-danger me-1"><?= (int)$lateStats['late_tasks'] ?></span> Tasks ล่าช้า
+  </span>
+  <span>
+    <span class="badge bg-danger me-1"><?= (int)$lateStats['late_cabinets'] ?></span> ตู้ล่าช้า
+  </span>
+  <span>
+    <span class="badge bg-danger me-1"><?= (int)$lateStats['late_projects'] ?></span> โครงการล่าช้า
+  </span>
+  <a href="panels.php?status=overdue" class="btn btn-sm btn-outline-danger ms-auto">ดูทั้งหมด</a>
+</div>
+<?php endif; ?>
 
 <div class="grid-3">
   <!-- LEFT: doughnut chart -->

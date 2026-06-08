@@ -162,57 +162,110 @@ function status_badge_class(string $status): string
 }
 
 /**
- * Compute the effective status of a project.
- * Priority order:
- *   1. completed_date set              -> completed  (manual override, always wins)
- *   2. all panels delivered            -> delivered
- *   3. some panels delivered           -> partial_delivery
- *   4. due_date < today                -> overdue
- *   5. due_date within NEAR_DUE_DAYS  -> near_due
- *   6. start_date <= today             -> in_progress
- *   7. otherwise                       -> pending
- *
- * Panel counts (panel_total / panel_delivered) must be pre-joined into $p
- * by get_projects() / get_project() — defaults to 0 if absent.
+ * Compute the effective status of a project from its panel statuses.
+ * Panel status counts (panel_total / panel_delivered / panel_overdue / panel_in_progress)
+ * must be pre-joined by get_projects() / get_project().
+ * Priority: completed > delivered > overdue > partial_delivery > in_progress > pending
  */
 function compute_status(array $p): string
 {
-    $today = strtotime(date('Y-m-d'));
-
     if (!empty($p['completed_date']) && $p['completed_date'] !== '0000-00-00') {
         return 'completed';
     }
 
-    $panelTotal     = (int)($p['panel_total']     ?? 0);
-    $panelDelivered = (int)($p['panel_delivered']  ?? 0);
+    $total       = (int)($p['panel_total']       ?? 0);
+    $delivered   = (int)($p['panel_delivered']   ?? 0);
+    $overdue     = (int)($p['panel_overdue']     ?? 0);
+    $inProgress  = (int)($p['panel_in_progress'] ?? 0);
 
-    if ($panelTotal > 0) {
-        if ($panelDelivered >= $panelTotal) {
-            return 'delivered';
-        }
-        if ($panelDelivered > 0) {
-            return 'partial_delivery';
-        }
-    }
-
-    $due   = !empty($p['due_date'])   ? strtotime($p['due_date'])   : null;
-    $start = !empty($p['start_date']) ? strtotime($p['start_date']) : null;
-
-    if ($due !== null) {
-        if ($due < $today) {
-            return 'overdue';
-        }
-        $diffDays = (int)floor(($due - $today) / 86400);
-        if ($diffDays <= NEAR_DUE_DAYS) {
-            return 'near_due';
-        }
-    }
-
-    if ($start !== null && $start <= $today) {
-        return 'in_progress';
-    }
-
+    if ($total === 0) return 'pending';
+    if ($delivered >= $total) return 'delivered';
+    if ($overdue > 0) return 'overdue';
+    if ($delivered > 0) return 'partial_delivery';
+    if ($inProgress > 0) return 'in_progress';
     return 'pending';
+}
+
+/**
+ * Color for a task's 3-state status slug.
+ */
+function task_status_color(string $status): string
+{
+    return match ($status) {
+        'in_progress' => '#FF7A00',
+        'completed'   => '#059669',
+        'overdue'     => '#EF4444',
+        default       => '#9CA3AF',
+    };
+}
+
+/**
+ * Compute delay info for a single task array.
+ * Returns: type (overdue|late_done|early|on_time|on_track|no_date), days (int), label (string), color (string).
+ */
+function get_task_delay_info(array $task): array
+{
+    $today    = date('Y-m-d');
+    $status   = $task['status'] ?? 'pending';
+    $dueDate  = $task['due_date'] ?? '';
+    $doneDate = $task['completed_date'] ?? '';
+
+    if ($status === 'completed') {
+        if (empty($dueDate) || empty($doneDate)) {
+            return ['type' => 'on_time', 'days' => 0, 'label' => 'ตรงแผน', 'color' => '#059669'];
+        }
+        $diff = (int)floor((strtotime($doneDate) - strtotime($dueDate)) / 86400);
+        if ($diff > 0) {
+            return ['type' => 'late_done', 'days' => $diff, 'label' => 'เสร็จล่าช้า ' . $diff . ' วัน', 'color' => '#F97316'];
+        }
+        if ($diff < 0) {
+            return ['type' => 'early', 'days' => abs($diff), 'label' => 'ก่อนกำหนด ' . abs($diff) . ' วัน', 'color' => '#059669'];
+        }
+        return ['type' => 'on_time', 'days' => 0, 'label' => 'ตรงแผน', 'color' => '#059669'];
+    }
+
+    if (empty($dueDate)) {
+        return ['type' => 'no_date', 'days' => 0, 'label' => '—', 'color' => '#9CA3AF'];
+    }
+
+    if ($dueDate < $today) {
+        $diff = (int)floor((strtotime($today) - strtotime($dueDate)) / 86400);
+        return ['type' => 'overdue', 'days' => $diff, 'label' => 'ล่าช้า ' . $diff . ' วัน', 'color' => '#EF4444'];
+    }
+
+    return ['type' => 'on_track', 'days' => 0, 'label' => '—', 'color' => '#9CA3AF'];
+}
+
+/**
+ * Task plan (planned_start/finish/duration) is editable only when task has not started.
+ * "Not started" = status is pending AND actual_start_date is empty AND progress_percent is 0.
+ */
+function is_task_plan_editable(array $task): bool
+{
+    if (($task['status'] ?? 'pending') !== 'pending') return false;
+    if (!empty($task['actual_start_date']))           return false;
+    if ((int)($task['progress_percent'] ?? 0) > 0)   return false;
+    return true;
+}
+
+/**
+ * Render HTML badge for task delay (used in PHP template + returned by AJAX).
+ */
+function task_delay_badge_html(array $task): string
+{
+    $d = get_task_delay_info($task);
+    if ($d['type'] === 'on_track' || $d['type'] === 'no_date') {
+        return '<span class="text-muted small">—</span>';
+    }
+    $icon = match ($d['type']) {
+        'overdue'   => '🔴',
+        'late_done' => '🟠',
+        'early'     => '🟢',
+        'on_time'   => '🟢',
+        default     => '',
+    };
+    return '<span style="background:' . e($d['color']) . ';color:#fff;padding:1px 6px;border-radius:20px;font-size:10px;white-space:nowrap">'
+        . $icon . ' ' . e($d['label']) . '</span>';
 }
 
 /**
@@ -253,22 +306,19 @@ function days_remaining(array $p): ?int
 function get_projects(array $filters = []): array
 {
     $sql = "SELECT p.*, d.name AS department, u.name AS responsible,
-                   COALESCE(pc.panel_total, 0)     AS panel_total,
-                   COALESCE(pc.panel_delivered, 0) AS panel_delivered
+                   COALESCE(pc.panel_total, 0)       AS panel_total,
+                   COALESCE(pc.panel_delivered, 0)   AS panel_delivered,
+                   COALESCE(pc.panel_overdue, 0)     AS panel_overdue,
+                   COALESCE(pc.panel_in_progress, 0) AS panel_in_progress
             FROM projects p
             LEFT JOIN departments d ON d.id = p.department_id
             LEFT JOIN users u       ON u.id = p.responsible_id
             LEFT JOIN (
                 SELECT project_id,
                        COUNT(*) AS panel_total,
-                       SUM(CASE
-                           WHEN status = 'delivered' THEN 1
-                           WHEN actual_delivery_date IS NOT NULL
-                                AND actual_delivery_date <= CURDATE() THEN 1
-                           WHEN status_mode = 'MANUAL'
-                                AND manual_status = 'm_delivered' THEN 1
-                           ELSE 0
-                       END) AS panel_delivered
+                       SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS panel_delivered,
+                       SUM(CASE WHEN status = 'overdue'   THEN 1 ELSE 0 END) AS panel_overdue,
+                       SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS panel_in_progress
                 FROM project_panels
                 GROUP BY project_id
             ) pc ON pc.project_id = p.id";
@@ -315,22 +365,19 @@ function get_project(int $id): ?array
 {
     $stmt = db()->prepare(
         "SELECT p.*, d.name AS department, u.name AS responsible,
-                COALESCE(pc.panel_total, 0)     AS panel_total,
-                COALESCE(pc.panel_delivered, 0) AS panel_delivered
+                COALESCE(pc.panel_total, 0)       AS panel_total,
+                COALESCE(pc.panel_delivered, 0)   AS panel_delivered,
+                COALESCE(pc.panel_overdue, 0)     AS panel_overdue,
+                COALESCE(pc.panel_in_progress, 0) AS panel_in_progress
          FROM projects p
          LEFT JOIN departments d ON d.id = p.department_id
          LEFT JOIN users u       ON u.id = p.responsible_id
          LEFT JOIN (
              SELECT project_id,
                     COUNT(*) AS panel_total,
-                    SUM(CASE
-                        WHEN status = 'delivered' THEN 1
-                        WHEN actual_delivery_date IS NOT NULL
-                             AND actual_delivery_date <= CURDATE() THEN 1
-                        WHEN status_mode = 'MANUAL'
-                             AND manual_status = 'm_delivered' THEN 1
-                        ELSE 0
-                    END) AS panel_delivered
+                    SUM(CASE WHEN status = 'delivered'   THEN 1 ELSE 0 END) AS panel_delivered,
+                    SUM(CASE WHEN status = 'overdue'     THEN 1 ELSE 0 END) AS panel_overdue,
+                    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS panel_in_progress
              FROM project_panels
              GROUP BY project_id
          ) pc ON pc.project_id = p.id
@@ -378,6 +425,34 @@ function dashboard_stats(array $projects): array
         'count'        => $count,
         'amount'       => $amount,
         'total_amount' => $totalAmount,
+    ];
+}
+
+/**
+ * Late item counts across all projects.
+ * "Late" = due_date < today AND not done.
+ */
+function get_late_stats(): array
+{
+    $today = date('Y-m-d');
+    $lateTasks = (int)db()->query(
+        "SELECT COUNT(*) FROM project_tasks
+         WHERE due_date IS NOT NULL AND due_date < '$today'
+           AND status NOT IN ('completed')"
+    )->fetchColumn();
+
+    $lateCabinets = (int)db()->query(
+        "SELECT COUNT(*) FROM project_panels WHERE status = 'overdue'"
+    )->fetchColumn();
+
+    $lateProjects = (int)db()->query(
+        "SELECT COUNT(DISTINCT project_id) FROM project_panels WHERE status = 'overdue'"
+    )->fetchColumn();
+
+    return [
+        'late_tasks'    => $lateTasks,
+        'late_cabinets' => $lateCabinets,
+        'late_projects' => $lateProjects,
     ];
 }
 
@@ -459,6 +534,535 @@ function get_project_panels_by_ids(int $projectId, array $ids): array
     return sort_panels($rows);
 }
 
+/* ======================================================================
+ *  DB-backed Task Template System
+ * ==================================================================== */
+
+/** Fetch all active templates for dropdown. */
+function get_task_templates(bool $activeOnly = true): array
+{
+    $sql = 'SELECT * FROM task_templates' . ($activeOnly ? ' WHERE is_active = 1' : '') . ' ORDER BY sort_order, id';
+    return db()->query($sql)->fetchAll();
+}
+
+/** Fetch a single template by id. */
+function get_task_template(int $id): ?array
+{
+    $st = db()->prepare('SELECT * FROM task_templates WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return $st->fetch() ?: null;
+}
+
+/** Fetch all items for a template, ordered by sort_order. */
+function get_task_template_items(int $templateId): array
+{
+    $st = db()->prepare('SELECT * FROM task_template_items WHERE template_id = :tid ORDER BY sort_order, id');
+    $st->execute([':tid' => $templateId]);
+    return $st->fetchAll();
+}
+
+/**
+ * Auto-detect the best DB template for a panel_type string.
+ * Matches cabinet_type prefix (case-insensitive). Falls back to 'Default Workflow'.
+ */
+function resolve_db_template(string $panelType): ?int
+{
+    $type = mb_strtoupper(trim($panelType));
+    $rows = db()->query("SELECT id, cabinet_type FROM task_templates WHERE is_active = 1 AND cabinet_type IS NOT NULL ORDER BY sort_order, id")->fetchAll();
+    foreach ($rows as $r) {
+        if ($type !== '' && str_starts_with($type, mb_strtoupper(trim($r['cabinet_type'])))) {
+            return (int)$r['id'];
+        }
+    }
+    // Fallback: Default Workflow
+    $st = db()->prepare("SELECT id FROM task_templates WHERE is_active = 1 ORDER BY sort_order, id LIMIT 1");
+    $st->execute();
+    $row = $st->fetch();
+    return $row ? (int)$row['id'] : null;
+}
+
+/**
+ * Create project_tasks from a DB template with auto-calculated planned dates.
+ * $startDate: 'YYYY-MM-DD' — planned start of the cabinet.
+ * $skipExisting: true = skip tasks with same name (case-insensitive).
+ * Returns [created, skipped].
+ */
+function create_tasks_from_db_template(
+    int    $projectId,
+    int    $panelId,
+    int    $templateId,
+    string $startDate,
+    bool   $skipExisting = false
+): array {
+    $items = get_task_template_items($templateId);
+    if (!$items) return [0, 0];
+
+    $existingNames = [];
+    if ($skipExisting) {
+        $st = db()->prepare('SELECT LOWER(task_name) FROM project_tasks WHERE panel_id = :pid');
+        $st->execute([':pid' => $panelId]);
+        $existingNames = $st->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    $ins = db()->prepare(
+        "INSERT INTO project_tasks
+           (project_id, panel_id, task_name, task_type, duration_days, sort_order,
+            start_date, due_date, status, progress_percent,
+            is_auto_created, template_name, template_id, template_item_id)
+         VALUES
+           (:proj, :pid, :name, :type, :dur, :ord,
+            :ps, :pf, 'pending', 0,
+            1, :tname, :tid, :iid)"
+    );
+
+    $tpl     = get_task_template($templateId);
+    $tplName = $tpl ? $tpl['template_name'] : '';
+    $cursor  = $startDate;
+    $created = 0;
+    $skipped = 0;
+
+    foreach ($items as $item) {
+        if ($skipExisting && in_array(mb_strtolower($item['task_name']), $existingNames, true)) {
+            $skipped++;
+            // Still advance cursor so ordering stays correct
+            $cursor = date('Y-m-d', strtotime($cursor . ' +' . max(1, (int)$item['duration_days']) . ' days'));
+            continue;
+        }
+        $dur     = max(1, (int)$item['duration_days']);
+        $psDate  = $cursor;
+        $pfDate  = date('Y-m-d', strtotime($psDate . ' +' . ($dur - 1) . ' days'));
+        $ins->execute([
+            ':proj' => $projectId,
+            ':pid'  => $panelId,
+            ':name' => $item['task_name'],
+            ':type' => $item['task_type'] ?? null,
+            ':dur'  => $dur,
+            ':ord'  => (int)$item['sort_order'],
+            ':ps'   => $psDate,
+            ':pf'   => $pfDate,
+            ':tname'=> $tplName,
+            ':tid'  => $templateId,
+            ':iid'  => (int)$item['id'],
+        ]);
+        $cursor = date('Y-m-d', strtotime($pfDate . ' +1 day'));
+        $created++;
+    }
+
+    // Stamp panel planned_start_date if not already set
+    if ($created > 0) {
+        db()->prepare(
+            "UPDATE project_panels
+             SET planned_start_date = COALESCE(planned_start_date, :ps)
+             WHERE id = :id"
+        )->execute([':ps' => $startDate, ':id' => $panelId]);
+        log_activity($projectId, 'auto_tasks', 'สร้างขั้นตอน ' . $created . ' รายการ จาก Template [' . $tplName . ']');
+    }
+
+    return [$created, $skipped];
+}
+
+/**
+ * Recalculate planned_start_date / due_date for all tasks in a panel starting from a given sort_order.
+ * Uses each task's duration_days to chain dates sequentially.
+ */
+function recalculate_task_dates_from(int $panelId, int $fromSortOrder = 1): void
+{
+    $tasks = db()->prepare(
+        "SELECT id, sort_order, duration_days, start_date, due_date
+         FROM project_tasks WHERE panel_id = :pid ORDER BY sort_order, id"
+    );
+    $tasks->execute([':pid' => $panelId]);
+    $all = $tasks->fetchAll();
+    if (!$all) return;
+
+    // Find the cursor: due_date of task just before fromSortOrder
+    $cursor = null;
+    foreach ($all as $t) {
+        if ((int)$t['sort_order'] < $fromSortOrder) {
+            if (!empty($t['due_date'])) {
+                $cursor = date('Y-m-d', strtotime($t['due_date'] . ' +1 day'));
+            }
+        }
+    }
+    // If no prior task, use first task's current start_date
+    if ($cursor === null) {
+        $cursor = $all[0]['start_date'] ?? date('Y-m-d');
+    }
+
+    $upd = db()->prepare(
+        "UPDATE project_tasks SET start_date = :ps, due_date = :pf WHERE id = :id"
+    );
+
+    foreach ($all as $t) {
+        if ((int)$t['sort_order'] < $fromSortOrder) continue;
+        $dur    = max(1, (int)$t['duration_days']);
+        $psDate = $cursor;
+        $pfDate = date('Y-m-d', strtotime($psDate . ' +' . ($dur - 1) . ' days'));
+        $upd->execute([':ps' => $psDate, ':pf' => $pfDate, ':id' => $t['id']]);
+        $cursor = date('Y-m-d', strtotime($pfDate . ' +1 day'));
+    }
+}
+
+/* ======================================================================
+ *  Auto Workflow / Task Templates  (legacy built-in array, kept for compat)
+ * ==================================================================== */
+
+/** @deprecated Use DB-backed templates via get_task_templates() instead. */
+function panel_task_templates(): array
+{
+    return [
+        'MDB' => [
+            'label' => 'MDB Workflow',
+            'steps' => [
+                'ขายรันงานเข้าระบบ', 'เขียนแบบ', 'อนุมัติแบบ',
+                'สั่งซื้อเหล็ก', 'เหล็กเข้า', 'ตัด/พับ/เชื่อม', 'พ่นสี',
+                'สั่งซื้ออุปกรณ์', 'อุปกรณ์เข้า', 'ประกอบอุปกรณ์',
+                'Busbar', 'เดินสาย', 'QC', 'FAT',
+                'แก้ไข Comment', 'เตรียมส่งมอบ', 'ส่งมอบ',
+            ],
+        ],
+        'DB' => [
+            'label' => 'DB Workflow',
+            'steps' => [
+                'เขียนแบบ', 'อนุมัติแบบ', 'สั่งซื้อเหล็ก', 'เหล็กเข้า', 'พ่นสี',
+                'สั่งซื้ออุปกรณ์', 'อุปกรณ์เข้า', 'ประกอบอุปกรณ์',
+                'เดินสาย', 'QC', 'เตรียมส่งมอบ', 'ส่งมอบ',
+            ],
+        ],
+        'MCC' => [
+            'label' => 'MCC Workflow',
+            'steps' => [
+                'เขียนแบบ', 'อนุมัติแบบ', 'สั่งซื้อเหล็ก', 'เหล็กเข้า',
+                'ผลิตโครงตู้', 'พ่นสี', 'สั่งซื้ออุปกรณ์', 'อุปกรณ์เข้า',
+                'ประกอบอุปกรณ์', 'Control Wiring', 'Power Wiring',
+                'Function Test', 'FAT', 'แก้ไข Comment', 'เตรียมส่งมอบ', 'ส่งมอบ',
+            ],
+        ],
+        'ATS' => [
+            'label' => 'ATS Workflow',
+            'steps' => [
+                'เขียนแบบ', 'อนุมัติแบบ', 'สั่งซื้อเหล็ก', 'เหล็กเข้า', 'พ่นสี',
+                'สั่งซื้ออุปกรณ์', 'อุปกรณ์เข้า', 'ติดตั้ง ATS Controller',
+                'Power Wiring', 'Control Wiring', 'Function Test', 'FAT',
+                'เตรียมส่งมอบ', 'ส่งมอบ',
+            ],
+        ],
+        'default' => [
+            'label' => 'Default Workflow',
+            'steps' => [
+                'เขียนแบบ', 'อนุมัติแบบ', 'สั่งซื้อวัสดุ', 'วัสดุเข้า',
+                'ผลิต', 'ประกอบ', 'ตรวจสอบ', 'เตรียมส่งมอบ', 'ส่งมอบ',
+            ],
+        ],
+    ];
+}
+
+/** Auto-detect template key from panel_type string. */
+function resolve_panel_template(string $panelType): string
+{
+    $type = mb_strtoupper(trim($panelType));
+    foreach (array_keys(panel_task_templates()) as $key) {
+        if ($key === 'default') {
+            continue;
+        }
+        if (str_starts_with($type, $key)) {
+            return $key;
+        }
+    }
+    return 'default';
+}
+
+/** Status → progress percent mapping (3-state simple system). */
+function task_status_to_progress(string $status): int
+{
+    return match ($status) {
+        'in_progress' => 50,
+        'completed'   => 100,
+        default       => 0,
+    };
+}
+
+/** Thai display label for a task status slug. */
+function task_status_label(string $status): string
+{
+    return match ($status) {
+        'in_progress' => 'เริ่มงานแล้ว',
+        'completed'   => 'เสร็จแล้ว',
+        'overdue'     => 'ล่าช้า',
+        default       => 'รอเริ่มงาน',
+    };
+}
+
+/**
+ * Update a task's status and auto-stamp actual dates.
+ * Computes progress from status (pending=0, in_progress=50, completed=100).
+ * Auto-sets actual_start_date when status → in_progress (if not yet set).
+ * Auto-sets completed_date when status → completed (if not yet set).
+ * Cascades recompute_panel_from_tasks() after update.
+ */
+function update_task_status(int $taskId, string $newStatus, ?string $actualStart = null, ?string $actualComplete = null): void
+{
+    $allowed = ['pending', 'in_progress', 'completed'];
+    if (!in_array($newStatus, $allowed, true)) {
+        return;
+    }
+    $today    = date('Y-m-d');
+    $progress = task_status_to_progress($newStatus);
+
+    // Fetch current task for context
+    $row = db()->prepare("SELECT * FROM project_tasks WHERE id = :id")->execute([':id' => $taskId])
+        ?: null;
+    $stFetch = db()->prepare("SELECT * FROM project_tasks WHERE id = :id");
+    $stFetch->execute([':id' => $taskId]);
+    $task = $stFetch->fetch();
+    if (!$task) return;
+
+    // Auto-stamp: actual_start_date
+    $stampStart = $actualStart;
+    if ($newStatus === 'in_progress' || $newStatus === 'completed') {
+        if ($stampStart === null && empty($task['actual_start_date'])) {
+            $stampStart = $today;
+        }
+    }
+
+    // Auto-stamp: completed_date
+    $stampComplete = $actualComplete;
+    if ($newStatus === 'completed') {
+        if ($stampComplete === null && empty($task['completed_date'])) {
+            $stampComplete = $today;
+        }
+    }
+    // Clear completed_date if reverting away from completed
+    if ($newStatus !== 'completed') {
+        $stampComplete = null;
+    }
+
+    // Status is always what the user sets (pending / in_progress / completed).
+    // Overdue is computed at display time from due_date vs today — never stored.
+    $sql = "UPDATE project_tasks
+            SET status = :st, progress_percent = :prog,
+                actual_start_date = COALESCE(:astart, actual_start_date),
+                completed_date    = :cdate
+            WHERE id = :id";
+    db()->prepare($sql)->execute([
+        ':st'     => $newStatus,
+        ':prog'   => $progress,
+        ':astart' => $stampStart,
+        ':cdate'  => $stampComplete,
+        ':id'     => $taskId,
+    ]);
+
+    if ((int)$task['panel_id']) {
+        recompute_panel_from_tasks((int)$task['panel_id']);
+    }
+}
+
+/** Fetch all tasks belonging to a specific panel, ordered by sort_order. */
+function get_panel_tasks(int $panelId): array
+{
+    $stmt = db()->prepare(
+        "SELECT * FROM project_tasks WHERE panel_id = :pid ORDER BY sort_order, id"
+    );
+    $stmt->execute([':pid' => $panelId]);
+    return $stmt->fetchAll();
+}
+
+/** Count tasks for a panel. */
+function count_panel_tasks(int $panelId): int
+{
+    $stmt = db()->prepare("SELECT COUNT(*) FROM project_tasks WHERE panel_id = :pid");
+    $stmt->execute([':pid' => $panelId]);
+    return (int)$stmt->fetchColumn();
+}
+
+/** Delete all tasks for a panel. */
+function delete_panel_tasks(int $panelId): void
+{
+    db()->prepare("DELETE FROM project_tasks WHERE panel_id = :pid")
+        ->execute([':pid' => $panelId]);
+}
+
+/**
+ * Create auto-workflow tasks for a panel from a named template.
+ * $template: 'MDB'|'DB'|'MCC'|'ATS'|'default'|'auto'|'copy:N'
+ * $skipExisting: true = add only task_names not already present
+ * Returns number of tasks inserted.
+ */
+function create_panel_auto_tasks(
+    int    $projectId,
+    int    $panelId,
+    string $template     = 'auto',
+    bool   $skipExisting = false
+): int {
+    // Auto-detect from panel_type
+    if ($template === 'auto') {
+        $st = db()->prepare("SELECT panel_type FROM project_panels WHERE id = :id");
+        $st->execute([':id' => $panelId]);
+        $template = resolve_panel_template((string)($st->fetchColumn() ?? ''));
+    }
+
+    // Copy from another panel
+    if (str_starts_with($template, 'copy:')) {
+        $sourceId = (int)substr($template, 5);
+        return _copy_panel_tasks($projectId, $panelId, $sourceId, $skipExisting);
+    }
+
+    $templates = panel_task_templates();
+    $steps     = ($templates[$template] ?? $templates['default'])['steps'];
+
+    // Build existing name set for duplicate check
+    $existingNames = [];
+    if ($skipExisting) {
+        $st = db()->prepare("SELECT task_name FROM project_tasks WHERE panel_id = :pid");
+        $st->execute([':pid' => $panelId]);
+        $existingNames = array_map('mb_strtolower', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    $ins = db()->prepare(
+        "INSERT INTO project_tasks
+           (project_id, panel_id, task_name, sort_order, status, progress_percent, is_auto_created, template_name)
+         VALUES (:pid, :panid, :name, :ord, 'pending', 0, 1, :tpl)"
+    );
+
+    $created = 0;
+    foreach ($steps as $i => $name) {
+        if ($skipExisting && in_array(mb_strtolower($name), $existingNames, true)) {
+            continue;
+        }
+        $ins->execute([
+            ':pid'   => $projectId,
+            ':panid' => $panelId,
+            ':name'  => $name,
+            ':ord'   => $i + 1,
+            ':tpl'   => $template,
+        ]);
+        $created++;
+    }
+
+    if ($created > 0) {
+        log_activity($projectId, 'auto_tasks',
+            'สร้างขั้นตอนอัตโนมัติ ' . $created . ' รายการ [' . $template . ']');
+    }
+    return $created;
+}
+
+/** Copy tasks from $sourcePanelId to $targetPanelId (reset progress to 0). */
+function _copy_panel_tasks(int $projectId, int $targetPanelId, int $sourcePanelId, bool $skipExisting): int
+{
+    $sourceTasks = get_panel_tasks($sourcePanelId);
+    if (!$sourceTasks) {
+        return 0;
+    }
+
+    $existingNames = [];
+    if ($skipExisting) {
+        $st = db()->prepare("SELECT task_name FROM project_tasks WHERE panel_id = :pid");
+        $st->execute([':pid' => $targetPanelId]);
+        $existingNames = array_map('mb_strtolower', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    $ins = db()->prepare(
+        "INSERT INTO project_tasks
+           (project_id, panel_id, task_name, task_type, sort_order, status, progress_percent, is_auto_created, template_name)
+         VALUES (:pid, :panid, :name, :type, :ord, 'pending', 0, 1, 'copy')"
+    );
+
+    $created = 0;
+    foreach ($sourceTasks as $t) {
+        if ($skipExisting && in_array(mb_strtolower($t['task_name']), $existingNames, true)) {
+            continue;
+        }
+        $ins->execute([
+            ':pid'   => $projectId,
+            ':panid' => $targetPanelId,
+            ':name'  => $t['task_name'],
+            ':type'  => $t['task_type'] ?? null,
+            ':ord'   => $t['sort_order'],
+        ]);
+        $created++;
+    }
+    return $created;
+}
+
+/**
+ * Recompute panel progress_percent, status, and task_status_label from its tasks.
+ * Progress = AVG of task_status_to_progress() per task (pending=0, in_progress=50, completed=100).
+ * Tasks are the single source of truth.
+ * Cascades up to recompute_project_progress().
+ */
+function recompute_panel_from_tasks(int $panelId): void
+{
+    $tasks = get_panel_tasks($panelId);
+
+    if (!$tasks) {
+        db()->prepare(
+            "UPDATE project_panels
+             SET progress_percent = 0, status = 'pending', task_status_label = NULL
+             WHERE id = :id"
+        )->execute([':id' => $panelId]);
+    } else {
+        $total     = count($tasks);
+        $today     = date('Y-m-d');
+
+        // Overdue = due_date < today AND status != completed (never stored, always computed)
+        $sumProgress = 0;
+        $hasOverdue  = false;
+        foreach ($tasks as $t) {
+            $s = $t['status'] ?? 'pending';
+            // Overdue tasks count as in_progress (50%) for progress calculation
+            $isOverdue = ($s !== 'completed'
+                && !empty($t['due_date'])
+                && $t['due_date'] < $today);
+            if ($isOverdue) $hasOverdue = true;
+            $sumProgress += task_status_to_progress($isOverdue ? 'in_progress' : $s);
+        }
+        $avgProgress = (int)round($sumProgress / $total);
+
+        $doneCount = count(array_filter($tasks, fn($t) => ($t['status'] ?? '') === 'completed'));
+        $allDone   = ($doneCount === $total);
+
+        if ($allDone) {
+            db()->prepare(
+                "UPDATE project_panels
+                 SET progress_percent = 100, status = 'delivered',
+                     task_status_label = 'ส่งมอบแล้ว',
+                     actual_delivery_date = COALESCE(actual_delivery_date, CURDATE())
+                 WHERE id = :id"
+            )->execute([':id' => $panelId]);
+        } else {
+            // First non-completed task = current stage
+            $firstIncomplete = null;
+            foreach ($tasks as $t) {
+                if (($t['status'] ?? '') !== 'completed') { $firstIncomplete = $t; break; }
+            }
+
+            if ($avgProgress === 0 && !$hasOverdue) {
+                $statusSlug  = 'pending';
+                $statusLabel = null;
+            } elseif ($firstIncomplete) {
+                $statusSlug  = $hasOverdue ? 'overdue' : 'in_progress';
+                $statusLabel = task_name_to_status_label($firstIncomplete['task_name'], $hasOverdue);
+            } else {
+                $statusSlug  = 'in_progress';
+                $statusLabel = 'กำลังดำเนินการ';
+            }
+
+            db()->prepare(
+                "UPDATE project_panels
+                 SET progress_percent = :prog, status = :st, task_status_label = :lbl
+                 WHERE id = :id"
+            )->execute([':prog' => $avgProgress, ':st' => $statusSlug, ':lbl' => $statusLabel, ':id' => $panelId]);
+        }
+    }
+
+    $pidSt = db()->prepare("SELECT project_id FROM project_panels WHERE id = :id");
+    $pidSt->execute([':id' => $panelId]);
+    $pid = (int)$pidSt->fetchColumn();
+    if ($pid) {
+        recompute_project_progress($pid);
+    }
+}
+
 function get_project_milestones(int $projectId): array
 {
     $stmt = db()->prepare(
@@ -489,41 +1093,92 @@ function panel_workflow_statuses(): array
     return ['pending','design','material','production','wiring','qc','ready_delivery','delivered'];
 }
 
-/** All panel statuses (incl. computed overdue) -> Thai manufacturing labels. */
+/** Panel status slugs → Thai display labels. */
 function panel_status_labels(): array
 {
     return [
         'pending'        => 'รอเริ่มงาน',
+        'in_progress'    => 'กำลังดำเนินการ',
+        'delivered'      => 'ส่งมอบแล้ว',
+        'overdue'        => 'ล่าช้า',
+        // Legacy workflow slugs (kept for backward compat with old data)
         'design'         => 'กำลังเขียนแบบ',
         'material'       => 'รออุปกรณ์',
         'production'     => 'กำลังผลิต / ประกอบ',
         'wiring'         => 'กำลังเดินสาย',
         'qc'             => 'กำลัง FAT',
         'ready_delivery' => 'พร้อมส่งมอบ',
-        'delivered'      => 'ส่งมอบแล้ว',
-        'overdue'        => 'ล่าช้า',
     ];
 }
 
 function panel_status_colors(): array
 {
     return [
-        'pending'        => '#94A3B8', // Slate    — รอเริ่มงาน
-        'design'         => '#3B82F6', // Blue     — กำลังเขียนแบบ
-        'material'       => '#F59E0B', // Amber    — รออุปกรณ์
-        'production'     => '#FF7A00', // Orange   — กำลังผลิต / ประกอบ (brand)
-        'wiring'         => '#8B5CF6', // Purple   — กำลังเดินสาย
-        'qc'             => '#06B6D4', // Cyan     — กำลัง FAT
-        'ready_delivery' => '#059669', // Emerald  — พร้อมส่งมอบ
-        'delivered'      => '#16A34A', // Green    — ส่งมอบแล้ว
-        'overdue'        => '#EF4444', // Red      — ล่าช้า
+        'pending'        => '#94A3B8', // Slate   — รอเริ่มงาน
+        'in_progress'    => '#FF7A00', // Orange  — กำลังดำเนินการ (brand)
+        'delivered'      => '#16A34A', // Green   — ส่งมอบแล้ว
+        'overdue'        => '#EF4444', // Red     — ล่าช้า
+        // Legacy workflow slugs
+        'design'         => '#3B82F6',
+        'material'       => '#F59E0B',
+        'production'     => '#FF7A00',
+        'wiring'         => '#8B5CF6',
+        'qc'             => '#06B6D4',
+        'ready_delivery' => '#059669',
     ];
 }
 
 /**
- * Status → progress percent mapping (Option B).
- * Statuses omitted from this map (overdue, m_overdue, m_on_hold, m_cancelled)
- * must NOT change progress — they are intentionally absent.
+ * Map a task name → cabinet display status label.
+ * If $isOverdue: returns "ล่าช้า: <taskName>" regardless of mapping.
+ */
+function task_name_to_status_label(string $taskName, bool $isOverdue = false): string
+{
+    if ($isOverdue) {
+        return 'ล่าช้า: ' . $taskName;
+    }
+    $map = [
+        'ขายรันงานเข้าระบบ' => 'รอขายรันงานเข้าระบบ',
+        'เขียนแบบ'           => 'กำลังเขียนแบบ',
+        'อนุมัติแบบ'         => 'รออนุมัติแบบ',
+        'สั่งซื้อเหล็ก'      => 'สั่งซื้อเหล็กแล้ว',
+        'เหล็กเข้า'          => 'รอเหล็กเข้า',
+        'ตัดเหล็ก'           => 'กำลังตัดเหล็ก',
+        'พับเหล็ก'           => 'กำลังพับเหล็ก',
+        'เชื่อมประกอบ'       => 'กำลังเชื่อมประกอบ',
+        'ตัด/พับ/เชื่อม'    => 'กำลังผลิตโครงตู้',
+        'พ่นสี'              => 'กำลังพ่นสี',
+        'ตู้เข้าโรงงาน'      => 'รอตู้เข้าโรงงาน',
+        'สั่งซื้ออุปกรณ์'    => 'สั่งซื้ออุปกรณ์แล้ว',
+        'อุปกรณ์เข้า'        => 'รออุปกรณ์เข้า',
+        'ตรวจรับอุปกรณ์'    => 'กำลังตรวจรับอุปกรณ์',
+        'ประกอบอุปกรณ์'      => 'กำลังประกอบอุปกรณ์',
+        'Busbar'             => 'กำลังทำ Busbar',
+        'เดินสาย'            => 'กำลังเดินสาย',
+        'QC'                 => 'กำลังตรวจสอบ QC',
+        'FAT'                => 'กำลัง FAT',
+        'แก้ไข Comment'      => 'กำลังแก้ไข Comment',
+        'เตรียมส่งมอบ'       => 'พร้อมส่งมอบ',
+        'ส่งมอบ'             => 'ส่งมอบแล้ว',
+    ];
+    return $map[$taskName] ?? 'กำลัง' . $taskName;
+}
+
+/**
+ * Return the display label for a panel row.
+ * Uses task_status_label if set (task-derived), otherwise falls back to status slug label.
+ */
+function panel_effective_label(array $panel): string
+{
+    if (!empty($panel['task_status_label'])) {
+        return $panel['task_status_label'];
+    }
+    return panel_status_label($panel['status'] ?? 'pending');
+}
+
+/**
+ * @deprecated Progress should come from task AVG, not status mapping.
+ * Kept only for backward compatibility with old data that has no tasks.
  */
 function panel_status_progress_map(): array
 {
@@ -745,56 +1400,27 @@ function panel_progress_for_status(string $status): int
 }
 
 /**
- * Effective (display) status of a panel.
- *
- * MANUAL mode: returns manual_status directly (user override).
- * AUTO mode:
- *   - actual_delivery_date set        -> delivered
- *   - target < today & not delivered  -> overdue
- *   - otherwise                       -> stored workflow step (status field)
+ * Effective status slug of a panel.
+ * Task-driven: status field is maintained by recompute_panel_from_tasks().
+ * Returns one of: 'pending' | 'in_progress' | 'overdue' | 'delivered'
  */
 function compute_panel_status(array $panel): string
 {
-    if (($panel['status_mode'] ?? 'AUTO') === 'MANUAL') {
-        $ms = $panel['manual_status'] ?? '';
-        return ($ms !== '' && $ms !== null) ? $ms : ($panel['status'] ?? 'pending');
-    }
-    // AUTO logic — cache today per-request to avoid repeated strtotime calls across loops
-    static $today = null;
-    $today ??= strtotime(date('Y-m-d'));
-    if (!empty($panel['actual_delivery_date']) && $panel['actual_delivery_date'] !== '0000-00-00') {
-        // Only treat as delivered if the actual date is today or in the past
-        if (strtotime($panel['actual_delivery_date']) <= $today) {
-            return 'delivered';
-        }
-    }
-    if (($panel['status'] ?? '') === 'delivered') {
-        // Delivered via workflow buttons — verify actual date is not future
-        $ado = $panel['actual_delivery_date'] ?? '';
-        if (empty($ado) || $ado === '0000-00-00' || strtotime($ado) <= $today) {
-            return 'delivered';
-        }
-        // actual_delivery_date is in the future — show as ready_delivery instead
-        return 'ready_delivery';
-    }
-    if (!empty($panel['target_delivery_date']) && $panel['target_delivery_date'] !== '0000-00-00') {
-        $target = strtotime($panel['target_delivery_date']);
-        if ($target < $today) {
-            return 'overdue';
-        }
-    }
     return $panel['status'] ?? 'pending';
 }
 
-/** Overdue days for a single panel (0 if not overdue). */
+/** Overdue days for a single panel (0 if not overdue or no target date). */
 function panel_overdue_days(array $panel): int
 {
-    if (compute_panel_status($panel) !== 'overdue') {
+    if (($panel['status'] ?? 'pending') !== 'overdue') {
+        return 0;
+    }
+    if (empty($panel['target_delivery_date']) || $panel['target_delivery_date'] === '0000-00-00') {
         return 0;
     }
     $today  = strtotime(date('Y-m-d'));
     $target = strtotime($panel['target_delivery_date']);
-    return (int)floor(($today - $target) / 86400);
+    return max(0, (int)floor(($today - $target) / 86400));
 }
 
 /* ----- Panel sort helpers ----- */
@@ -968,32 +1594,30 @@ function get_panel_responsibles(): array
 
 /**
  * Panel statistics for dashboards.
- * "producing" = active work (not pending / delivered / overdue).
+ * Uses task-derived status slugs: pending | in_progress | overdue | delivered
  */
 function panel_stats(array $panels): array
 {
-    $keys  = array_keys(panel_status_labels());
-    $count = array_fill_keys($keys, 0);
+    $count = ['pending' => 0, 'in_progress' => 0, 'overdue' => 0, 'delivered' => 0];
     $sumProgress = 0;
     foreach ($panels as $pn) {
         $s = $pn['eff_status'] ?? compute_panel_status($pn);
+        // Normalise legacy slugs to the four canonical ones
+        if (in_array($s, ['design','material','production','wiring','qc','ready_delivery'], true)) {
+            $s = 'in_progress';
+        }
         $count[$s] = ($count[$s] ?? 0) + 1;
         $sumProgress += (int)$pn['progress_percent'];
     }
-    $total     = count($panels);
-    $delivered = ($count['delivered'] ?? 0) + ($count['m_delivered'] ?? 0);
-    $overdue   = ($count['overdue']   ?? 0) + ($count['m_overdue']   ?? 0);
-    $notProducing = ['pending','m_wait_start','delivered','m_delivered',
-                     'overdue','m_overdue','m_on_hold','m_cancelled'];
-    $producing = $total - array_sum(array_map(fn($k) => $count[$k] ?? 0, $notProducing));
+    $total = count($panels);
     return [
-        'total'     => $total,
-        'count'     => $count,
-        'delivered' => $delivered,
-        'overdue'   => $overdue,
-        'producing' => max(0, $producing),
-        'pending'   => ($count['pending'] ?? 0) + ($count['m_wait_start'] ?? 0),
-        'overall'   => $total ? (int)round($sumProgress / $total) : 0,
+        'total'       => $total,
+        'count'       => $count,
+        'delivered'   => $count['delivered'],
+        'overdue'     => $count['overdue'],
+        'producing'   => $count['in_progress'],
+        'pending'     => $count['pending'],
+        'overall'     => $total ? (int)round($sumProgress / $total) : 0,
     ];
 }
 
@@ -1023,18 +1647,10 @@ function recompute_project_progress(int $projectId): void
 
 function collect_panel_post(): array
 {
-    $nullable  = fn($v) => ($v === '' || $v === null) ? null : $v;
-    $actual    = $nullable($_POST['actual_delivery_date'] ?? '');
-    // actual_delivery_date must be today or past — future dates are not valid for a completed delivery
+    $nullable = fn($v) => ($v === '' || $v === null) ? null : $v;
+    $actual   = $nullable($_POST['actual_delivery_date'] ?? '');
     if ($actual !== null && strtotime($actual) > strtotime(date('Y-m-d'))) {
         $actual = null;
-    }
-    $mode      = in_array($_POST['status_mode'] ?? '', ['AUTO','MANUAL'], true)
-                 ? $_POST['status_mode'] : 'AUTO';
-    $manualVal = $nullable($_POST['manual_status'] ?? '');
-    // Validate manual_status against allowed keys
-    if ($manualVal !== null && !array_key_exists($manualVal, manual_status_options())) {
-        $manualVal = null;
     }
     $data = [
         'panel_no'             => trim($_POST['panel_no'] ?? ''),
@@ -1044,18 +1660,15 @@ function collect_panel_post(): array
         'delivery_group'       => $nullable(trim($_POST['delivery_group'] ?? '')),
         'target_delivery_date' => $nullable($_POST['target_delivery_date'] ?? ''),
         'actual_delivery_date' => $actual,
-        'status_mode'          => $mode,
-        'manual_status'        => ($mode === 'MANUAL') ? $manualVal : null,
         'responsible'          => $nullable(trim($_POST['responsible'] ?? '')),
         'remark'               => $nullable(trim($_POST['remark'] ?? '')),
         'sort_order'           => (int)($_POST['sort_order'] ?? 0),
-        'progress_percent'     => max(0, min(100, (int)($_POST['progress_percent'] ?? 0))),
+        'planned_start_date'   => $nullable($_POST['planned_start_date'] ?? ''),
     ];
-    // Auto-stamp delivered only when actual date is today or already past
-    // Progress is NOT forced — stays whatever the user set
+    // Actual delivery date → mark delivered (tasks will override on next recompute)
     if ($actual && strtotime($actual) <= strtotime(date('Y-m-d'))) {
-        $data['status']      = 'delivered';
-        $data['status_mode'] = 'AUTO'; // delivered via actual date overrides mode
+        $data['status']           = 'delivered';
+        $data['task_status_label'] = 'ส่งมอบแล้ว';
     }
     return $data;
 }
@@ -1098,31 +1711,26 @@ function update_panel(int $id, array $data): void
     log_activity($pid, 'panel_edit', 'แก้ไขตู้ ' . ($data['panel_no'] ?? ''));
 }
 
+/**
+ * Direct status write for legacy workflow buttons (drawer nav).
+ * Progress is now driven by tasks only — this only updates the status field.
+ * @deprecated Use recompute_panel_from_tasks() for task-driven updates.
+ */
 function set_panel_status(int $id, string $status): void
 {
-    if (!in_array($status, panel_workflow_statuses(), true)) {
+    $allowed = ['pending', 'in_progress', 'delivered', 'overdue',
+                'design', 'material', 'production', 'wiring', 'qc', 'ready_delivery'];
+    if (!in_array($status, $allowed, true)) {
         return;
     }
-    $params     = [':s' => $status, ':id' => $id];
-    $extraSql   = '';
-
-    // Auto-stamp actual delivery date when marking as delivered
+    $extraSql = '';
+    $params   = [':s' => $status, ':id' => $id];
     if ($status === 'delivered') {
-        $extraSql .= ', actual_delivery_date = COALESCE(actual_delivery_date, CURDATE())';
+        $extraSql = ', actual_delivery_date = COALESCE(actual_delivery_date, CURDATE())';
     }
-
-    // Update progress_percent from mapping (Option B).
-    // Statuses absent from the map (overdue etc.) keep current progress.
-    $progressMap = panel_status_progress_map();
-    if (array_key_exists($status, $progressMap)) {
-        $extraSql .= ', progress_percent = :prog';
-        $params[':prog'] = $progressMap[$status];
-    }
-
     db()->prepare(
         "UPDATE project_panels SET status = :s $extraSql WHERE id = :id"
     )->execute($params);
-
     $pidSt2 = db()->prepare("SELECT project_id FROM project_panels WHERE id = :id");
     $pidSt2->execute([':id' => $id]);
     $pid = (int)$pidSt2->fetchColumn();

@@ -132,33 +132,9 @@ render_header('ติดตามสถานะรายตู้ (Panel Tracki
                   <span class="small text-muted"><?= (int)$pn['progress_percent'] ?>%</span>
                 </td>
                 <td>
-                  <?php
-                    $mode  = $pn['status_mode'] ?? 'AUTO';
-                    $wf    = panel_workflow_statuses();
-                    $dbIdx = ($k = array_search($pn['status'] ?? 'pending', $wf)) !== false ? $k : 0;
-                    $prevS = $dbIdx > 0 ? $wf[$dbIdx - 1] : null;
-                    $nextS = $dbIdx < count($wf) - 1 ? $wf[$dbIdx + 1] : null;
-                    $sUrl  = fn($s) => 'panel_update_status.php?id=' . (int)$pn['id'] . '&status=' . urlencode($s) . '&return=' . urlencode($returnUrl);
-                  ?>
-                  <div class="d-flex align-items-center gap-1 flex-nowrap">
-                    <?php if ($mode === 'AUTO'): ?>
-                      <?php if ($prevS): ?>
-                        <a href="<?= e($sUrl($prevS)) ?>" class="btn btn-sm btn-outline-secondary py-0 px-1" title="<?= e(panel_status_label($prevS)) ?>">‹</a>
-                      <?php else: ?>
-                        <span class="btn btn-sm btn-light py-0 px-1" style="opacity:.25;cursor:default">‹</span>
-                      <?php endif; ?>
-                    <?php endif; ?>
-                    <span class="status-pill" style="background:<?= panel_status_color($es) ?>"><?= e(panel_status_label($es)) ?></span>
-                    <?php if ($mode === 'MANUAL'): ?>
-                      <span class="badge" style="background:#6B7280;font-size:10px;padding:2px 5px" title="Manual Override">M</span>
-                    <?php else: ?>
-                      <?php if ($nextS): ?>
-                        <a href="<?= e($sUrl($nextS)) ?>" class="btn btn-sm btn-success py-0 px-1" title="<?= e(panel_status_label($nextS)) ?>">›</a>
-                      <?php else: ?>
-                        <span class="btn btn-sm btn-light py-0 px-1" style="opacity:.25;cursor:default">›</span>
-                      <?php endif; ?>
-                    <?php endif; ?>
-                  </div>
+                  <span class="status-pill" style="background:<?= panel_status_color($es) ?>">
+                    <?= e(panel_effective_label($pn)) ?>
+                  </span>
                 </td>
                 <td class="small"><?= e($pn['responsible'] ?: '-') ?></td>
               </tr>
