@@ -802,6 +802,8 @@ render_header('โครงการ ' . $p['project_no'], 'projects.php');
                                         class="form-select form-select-sm task-status-sel"
                                         data-task-id="<?= $tid ?>"
                                         data-panel-id="<?= $tPanelId ?>"
+                                        data-prev-value="<?= $selectVal ?>"
+                                        data-task-name="<?= e($task['task_name']) ?>"
                                         style="width:118px;font-size:11px;border-color:<?= $tColor ?>;color:<?= $tColor ?>;font-weight:600"
                                         onchange="taskUpdateStatus(this)">
                                   <option value="pending"     <?= $selectVal === 'pending'     ? 'selected' : '' ?>>รอเริ่มงาน</option>
@@ -1181,6 +1183,29 @@ render_header('โครงการ ' . $p['project_no'], 'projects.php');
   </div>
 </div>
 
+<!-- Task Status Confirm Modal -->
+<div class="modal fade" id="taskStatusConfirmModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-arrow-repeat me-1"></i>ยืนยันการเปลี่ยนสถานะ</h6>
+      </div>
+      <div class="modal-body py-3 text-center">
+        <div id="scTaskName" class="fw-600 mb-3" style="font-size:13px"></div>
+        <div class="d-flex align-items-center justify-content-center gap-2">
+          <span id="scFromBadge" class="badge" style="font-size:11px;padding:5px 10px"></span>
+          <i class="bi bi-arrow-right text-muted"></i>
+          <span id="scToBadge"   class="badge" style="font-size:11px;padding:5px 10px"></span>
+        </div>
+      </div>
+      <div class="modal-footer py-2 justify-content-center gap-2">
+        <button type="button" class="btn btn-sm btn-secondary" id="scCancelBtn" style="min-width:80px">ยกเลิก</button>
+        <button type="button" class="btn btn-sm btn-primary"   id="scConfirmBtn" style="min-width:80px">ยืนยัน</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
@@ -1291,18 +1316,84 @@ render_header('โครงการ ' . $p['project_no'], 'projects.php');
     });
   });
 
+  /* Task status change via AJAX — with confirmation modal */
+  (function () {
+    var ST_LABEL = { pending: 'รอเริ่มงาน', in_progress: 'เริ่มงานแล้ว', completed: 'เสร็จแล้ว' };
+    var ST_COLOR = { pending: '#9CA3AF',    in_progress: '#FF7A00',       completed: '#059669'    };
+
+    var confirmModal = null;
+    var pendingSel   = null;
+    var pendingNew   = null;
+
+    function getModal() {
+      if (!confirmModal) confirmModal = new bootstrap.Modal(document.getElementById('taskStatusConfirmModal'));
+      return confirmModal;
+    }
+
+    document.getElementById('scConfirmBtn').addEventListener('click', function () {
+      if (!pendingSel) return;
+      var sel = pendingSel; var newStat = pendingNew;
+      pendingSel = null; pendingNew = null;
+      getModal().hide();
+
+      sel.disabled = true;
+      fetch('api/task_update.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          action:     'status',
+          project_id: PROJECT_ID,
+          task_id:    parseInt(sel.dataset.taskId, 10),
+          new_status: newStat
+        })
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) { alert('เกิดข้อผิดพลาด: ' + (data.error || 'unknown')); sel.disabled = false; return; }
+        sel.dataset.prevValue = newStat;
+        updateTaskRowDom(sel.dataset.taskId, data.task);
+        updateCabinetRowDom(sel.dataset.panelId, data.panel);
+        sel.disabled = false;
+      })
+      .catch(function (err) { console.error(err); sel.disabled = false; });
+    });
+
+    document.getElementById('scCancelBtn').addEventListener('click', function () {
+      if (pendingSel) pendingSel.value = pendingSel.dataset.prevValue;
+      pendingSel = null; pendingNew = null;
+      getModal().hide();
+    });
+
+    window.taskUpdateStatus = function (sel) {
+      var prev   = sel.dataset.prevValue;
+      var newVal = sel.value;
+      if (!prev || prev === newVal) return;
+
+      sel.value = prev; /* revert visually until confirmed */
+
+      document.getElementById('scTaskName').textContent    = sel.dataset.taskName || '';
+      document.getElementById('scFromBadge').textContent   = ST_LABEL[prev]   || prev;
+      document.getElementById('scFromBadge').style.background = ST_COLOR[prev]   || '#9CA3AF';
+      document.getElementById('scToBadge').textContent     = ST_LABEL[newVal] || newVal;
+      document.getElementById('scToBadge').style.background   = ST_COLOR[newVal] || '#9CA3AF';
+
+      pendingSel = sel;
+      pendingNew = newVal;
+      getModal().show();
+    };
+  }());
+
   /* ── Restore active tab from ?_tab= param ── */
+  /* Deferred: bootstrap.Tab is only available after render_footer() loads bootstrap.bundle.min.js */
   const activeTab = new URLSearchParams(location.search).get('_tab');
   if (activeTab) {
-    const tabBtn = document.querySelector('[data-bs-target="#tab-' + CSS.escape(activeTab) + '"]');
-    if (tabBtn) {
-      const bsTab = new bootstrap.Tab(tabBtn);
-      bsTab.show();
-    }
-    /* clean up URL without reloading */
-    const url = new URL(location.href);
-    url.searchParams.delete('_tab');
-    history.replaceState(null, '', url.toString());
+    document.addEventListener('DOMContentLoaded', function () {
+      const tabBtn = document.querySelector('[data-bs-target="#tab-' + CSS.escape(activeTab) + '"]');
+      if (tabBtn) new bootstrap.Tab(tabBtn).show();
+      const url = new URL(location.href);
+      url.searchParams.delete('_tab');
+      history.replaceState(null, '', url.toString());
+    });
   }
 
   /* ── Bulk action checkboxes ── */
@@ -1380,19 +1471,20 @@ render_header('โครงการ ' . $p['project_no'], 'projects.php');
   });
 
   /* ── Auto-expand panel from ?open_panel=N ── */
+  /* Deferred: bootstrap.Tab is only available after render_footer() loads bootstrap.bundle.min.js */
   (function () {
     const openPanelId = new URLSearchParams(location.search).get('open_panel');
     if (!openPanelId || openPanelId === '0') return;
-    const tr = document.getElementById('tasks-row-' + openPanelId);
-    if (tr) {
+    document.addEventListener('DOMContentLoaded', function () {
+      const tr = document.getElementById('tasks-row-' + openPanelId);
+      if (!tr) return;
       tr.classList.remove('d-none');
       const btn = document.querySelector('.pv-tasks-toggle[data-panel-id="' + openPanelId + '"]');
       if (btn) btn.classList.add('active');
-      /* Switch to cabinets tab */
       const cabTab = document.querySelector('[data-bs-target="#tab-cabinets"]');
-      if (cabTab) { new bootstrap.Tab(cabTab).show(); }
+      if (cabTab) new bootstrap.Tab(cabTab).show();
       setTimeout(function () { tr.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300);
-    }
+    });
   }());
 
   /* ══════════════════════════════════════════════
@@ -1466,33 +1558,6 @@ render_header('โครงการ ' . $p['project_no'], 'projects.php');
       pvRow.dataset.progress    = panel.progress_percent;
     }
   }
-
-  /* Task status change via AJAX */
-  window.taskUpdateStatus = function (sel) {
-    var taskId    = sel.dataset.taskId;
-    var panelId   = sel.dataset.panelId;
-    var newStatus = sel.value;
-    sel.disabled  = true;
-
-    fetch('api/task_update.php', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        action:     'status',
-        project_id: PROJECT_ID,
-        task_id:    parseInt(taskId, 10),
-        new_status: newStatus
-      })
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      if (!data.ok) { alert('เกิดข้อผิดพลาด: ' + (data.error || 'unknown')); sel.disabled = false; return; }
-      updateTaskRowDom(taskId, data.task);
-      updateCabinetRowDom(panelId, data.panel);
-      sel.disabled = false;
-    })
-    .catch(function (err) { console.error(err); sel.disabled = false; });
-  };
 
   /* ── Task planned-date edit modal ── */
   (function () {
