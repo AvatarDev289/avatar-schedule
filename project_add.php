@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         $attachment = handle_upload('attachment');
         $id = create_project($data, $attachment);
+        save_project_attachments($id, 'attachments');
         header('Location: projects.php?msg=' . rawurlencode('เพิ่มโครงการเรียบร้อยแล้ว'));
         exit;
     }

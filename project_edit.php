@@ -33,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         $attachment = handle_upload('attachment'); // null if no new file
         update_project($id, $data, $attachment);
+        save_project_attachments($id, 'attachments');
         header('Location: project_view.php?id=' . $id . '&msg=' . rawurlencode('บันทึกการแก้ไขแล้ว'));
         exit;
     }
@@ -42,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $isEdit          = true;
 $panelProgExists = (project_progress_from_panels($id) !== null);
+$existingAttachments = get_project_attachments($id);
 
 render_header('แก้ไขโครงการ ' . $p['project_no'], 'projects.php');
 ?>

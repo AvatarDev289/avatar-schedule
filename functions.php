@@ -1828,20 +1828,24 @@ function collect_project_post(): array
 {
     $nullable = fn($v) => ($v === '' || $v === null) ? null : $v;
     return [
-        'project_no'     => trim($_POST['project_no'] ?? ''),
-        'project_name'   => trim($_POST['project_name'] ?? ''),
-        'description'    => $nullable(trim($_POST['description'] ?? '')),
-        'customer'       => $nullable(trim($_POST['customer'] ?? '')),
-        'department_id'  => $nullable($_POST['department_id'] ?? '') ? (int)$_POST['department_id'] : null,
-        'responsible_id' => $nullable($_POST['responsible_id'] ?? '') ? (int)$_POST['responsible_id'] : null,
-        'start_date'     => $nullable($_POST['start_date'] ?? ''),
-        'due_date'       => $nullable($_POST['due_date'] ?? ''),
-        'delivery_date'  => $nullable($_POST['delivery_date'] ?? ''),
-        'completed_date' => $nullable($_POST['completed_date'] ?? ''),
-        'status'         => $_POST['status'] ?? 'pending',
-        'progress'       => max(0, min(100, (int)($_POST['progress'] ?? 0))),
-        'amount'         => (float)($_POST['amount'] ?? 0),
-        'remark'         => $nullable(trim($_POST['remark'] ?? '')),
+        'project_no'        => trim($_POST['project_no'] ?? ''),
+        'project_name'      => trim($_POST['project_name'] ?? ''),
+        'description'       => $nullable(trim($_POST['description'] ?? '')),
+        'customer'          => $nullable(trim($_POST['customer'] ?? '')),
+        'sale_name'         => $nullable(trim($_POST['sale_name'] ?? '')),
+        'payment_terms'     => $nullable(trim($_POST['payment_terms'] ?? '')),
+        'delivery_location'        => $nullable(trim($_POST['delivery_location'] ?? '')),
+        'delivery_location_detail' => $nullable(trim($_POST['delivery_location_detail'] ?? '')),
+        'department_id'     => $nullable($_POST['department_id'] ?? '') ? (int)$_POST['department_id'] : null,
+        'responsible_id'    => $nullable($_POST['responsible_id'] ?? '') ? (int)$_POST['responsible_id'] : null,
+        'start_date'        => $nullable($_POST['start_date'] ?? ''),
+        'due_date'          => $nullable($_POST['due_date'] ?? ''),
+        'delivery_date'     => $nullable($_POST['delivery_date'] ?? ''),
+        'completed_date'    => $nullable($_POST['completed_date'] ?? ''),
+        'status'            => $_POST['status'] ?? 'pending',
+        'progress'          => max(0, min(100, (int)($_POST['progress'] ?? 0))),
+        'amount'            => (float)($_POST['amount'] ?? 0),
+        'remark'            => $nullable(trim($_POST['remark'] ?? '')),
     ];
 }
 
@@ -1868,6 +1872,118 @@ function handle_upload(string $field = 'attachment'): ?string
         return $safe;
     }
     return null;
+}
+
+/** Save multiple uploaded files and insert rows into project_attachments. Returns count saved. */
+function save_project_attachments(int $projectId, string $field = 'attachments'): int
+{
+    if (empty($_FILES[$field]['name'])) {
+        return 0;
+    }
+    if (!is_dir(UPLOAD_DIR)) {
+        @mkdir(UPLOAD_DIR, 0775, true);
+    }
+    $allowed = ['pdf','png','jpg','jpeg','gif','webp','doc','docx','xls','xlsx','csv','dwg','zip','rar'];
+    $names   = (array)$_FILES[$field]['name'];
+    $tmps    = (array)$_FILES[$field]['tmp_name'];
+    $errors  = (array)$_FILES[$field]['error'];
+    $sizes   = (array)$_FILES[$field]['size'];
+    $types   = (array)$_FILES[$field]['type'];
+    $ins = db()->prepare(
+        "INSERT INTO project_attachments (project_id, file_name, original_name, file_size, mime_type)
+         VALUES (:pid, :fn, :on, :sz, :mt)"
+    );
+    $saved = 0;
+    foreach ($names as $i => $orig) {
+        if (($errors[$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) continue;
+        $orig = basename($orig);
+        $ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+        if ($ext && !in_array($ext, $allowed, true)) continue;
+        $safe = 'prj_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . ($ext ? '.' . $ext : '');
+        if (!move_uploaded_file($tmps[$i], UPLOAD_DIR . '/' . $safe)) continue;
+        $ins->execute([
+            ':pid' => $projectId,
+            ':fn'  => $safe,
+            ':on'  => $orig,
+            ':sz'  => (int)($sizes[$i] ?? 0),
+            ':mt'  => $types[$i] ?? '',
+        ]);
+        $saved++;
+    }
+    return $saved;
+}
+
+/** Save multiple uploaded files for a panel. Returns count saved. */
+function save_panel_attachments(int $panelId, string $field = 'panel_attachments'): int
+{
+    if (empty($_FILES[$field]['name'])) return 0;
+    if (!is_dir(UPLOAD_DIR)) @mkdir(UPLOAD_DIR, 0775, true);
+    $allowed = ['pdf','png','jpg','jpeg','gif','webp','doc','docx','xls','xlsx','csv','dwg','zip','rar'];
+    $names   = (array)$_FILES[$field]['name'];
+    $tmps    = (array)$_FILES[$field]['tmp_name'];
+    $errors  = (array)$_FILES[$field]['error'];
+    $sizes   = (array)$_FILES[$field]['size'];
+    $types   = (array)$_FILES[$field]['type'];
+    $ins = db()->prepare(
+        "INSERT INTO panel_attachments (panel_id, file_name, original_name, file_size, mime_type)
+         VALUES (:pid, :fn, :on, :sz, :mt)"
+    );
+    $saved = 0;
+    foreach ($names as $i => $orig) {
+        if (($errors[$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) continue;
+        $orig = basename($orig);
+        $ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+        if ($ext && !in_array($ext, $allowed, true)) continue;
+        $safe = 'pnl_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . ($ext ? '.' . $ext : '');
+        if (!move_uploaded_file($tmps[$i], UPLOAD_DIR . '/' . $safe)) continue;
+        $ins->execute([':pid' => $panelId, ':fn' => $safe, ':on' => $orig, ':sz' => (int)($sizes[$i] ?? 0), ':mt' => $types[$i] ?? '']);
+        $saved++;
+    }
+    return $saved;
+}
+
+/** Fetch all attachments for a panel. */
+function get_panel_attachments(int $panelId): array
+{
+    $st = db()->prepare("SELECT * FROM panel_attachments WHERE panel_id = :pid ORDER BY uploaded_at DESC");
+    $st->execute([':pid' => $panelId]);
+    return $st->fetchAll();
+}
+
+/** Delete a single panel attachment (scoped to panel for safety). */
+function delete_panel_attachment(int $attachId, int $panelId): bool
+{
+    $st = db()->prepare("SELECT file_name FROM panel_attachments WHERE id = :id AND panel_id = :pid");
+    $st->execute([':id' => $attachId, ':pid' => $panelId]);
+    $row = $st->fetch();
+    if (!$row) return false;
+    $path = UPLOAD_DIR . '/' . $row['file_name'];
+    if (file_exists($path)) @unlink($path);
+    db()->prepare("DELETE FROM panel_attachments WHERE id = :id")->execute([':id' => $attachId]);
+    return true;
+}
+
+/** Fetch all attachments for a project. */
+function get_project_attachments(int $projectId): array
+{
+    $st = db()->prepare(
+        "SELECT * FROM project_attachments WHERE project_id = :pid ORDER BY uploaded_at DESC"
+    );
+    $st->execute([':pid' => $projectId]);
+    return $st->fetchAll();
+}
+
+/** Delete a single attachment (by id, scoped to project for safety). */
+function delete_project_attachment(int $attachId, int $projectId): bool
+{
+    $st = db()->prepare("SELECT file_name FROM project_attachments WHERE id = :id AND project_id = :pid");
+    $st->execute([':id' => $attachId, ':pid' => $projectId]);
+    $row = $st->fetch();
+    if (!$row) return false;
+    $path = UPLOAD_DIR . '/' . $row['file_name'];
+    if (file_exists($path)) @unlink($path);
+    db()->prepare("DELETE FROM project_attachments WHERE id = :id")->execute([':id' => $attachId]);
+    return true;
 }
 
 /** Insert a project, returns new id. */

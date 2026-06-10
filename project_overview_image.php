@@ -67,24 +67,8 @@ $milestones = get_project_milestones($id);
  */
 $tasks = [];
 
-if ($scope === 'all') {
-    $tasks = get_project_tasks($id);
-    // Normalize DB task fields → end_date + progress so build_timeline() can use them
-    foreach ($tasks as &$t) {
-        if (!isset($t['end_date'])) $t['end_date'] = $t['due_date'] ?? null;
-        // Use status-based progress: pending=0, in_progress=50, completed=100
-        $tSt = $t['status'] ?? 'pending';
-        $t['progress'] = task_status_to_progress($tSt === 'overdue' ? 'in_progress' : $tSt);
-        if (!isset($t['color'])) {
-            $sc = ['completed' => '#16A34A', 'in_progress' => '#FF7A00',
-                   'overdue' => '#EF4444', 'cancelled' => '#6B7280'];
-            $t['color'] = $sc[$tSt] ?? '#94A3B8';
-        }
-    }
-    unset($t);
-}
-
-/* Fallback 1: no DB tasks (or scoped mode) → build rows from panels */
+/* For scope=all: always build one bar per panel (not per workflow step)
+ * so the timeline stays compact regardless of how many steps each panel has. */
 if (!$tasks && $panels) {
     $startBase = !empty($p['start_date']) ? $p['start_date'] : date('Y-m-d');
     foreach ($panels as $pn) {
@@ -278,7 +262,7 @@ if ($tls_done) {
 }
 $sumNext = $tls_nxt
     ? mb_strimwidth($tls_nxt['task_name'] ?? '', 0, 44, '…')
-    : ($tls_done ? '—' : 'ไม่มีขั้นตอนถัดไป');
+    : ($tls_done ? '—' : 'ไม่มีตู้ถัดไป');
 
 /* ---------- Debug mode: ?debug_timeline=1 ---------- */
 if (!empty($_GET['debug_timeline'])) {
@@ -485,7 +469,7 @@ if (!empty($_GET['debug_timeline'])) {
               <div class="tls-val" style="color:<?= $sumColor ?>"><?= e($sumStatus) ?></div>
             </div>
             <div class="tls-item">
-              <div class="tls-lbl">ขั้นตอนงาน</div>
+              <div class="tls-lbl">ตู้ที่กำลังดำเนินการ</div>
               <div class="tls-val"><?= e($sumStage) ?></div>
             </div>
             <div class="tls-item">
@@ -493,7 +477,7 @@ if (!empty($_GET['debug_timeline'])) {
               <div class="tls-val" style="color:<?= $sumColor ?>"><?= $sumProgress ?>%</div>
             </div>
             <div class="tls-item">
-              <div class="tls-lbl">ขั้นตอนถัดไป</div>
+              <div class="tls-lbl">ตู้ถัดไป</div>
               <div class="tls-val"><?= e($sumNext) ?></div>
             </div>
             <div class="tls-item">

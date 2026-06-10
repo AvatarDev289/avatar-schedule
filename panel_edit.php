@@ -24,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         update_panel($id, $data);
+        save_panel_attachments($id, 'panel_attachments');
 
         $msg = 'บันทึกการแก้ไขตู้แล้ว';
         if (!empty($_POST['auto_tasks'])) {
@@ -92,7 +93,7 @@ render_header('แก้ไขตู้ ' . $pn['panel_no'], 'projects.php');
 ob_start();
 require __DIR__ . '/_panel_form.php';
 $html = ob_get_clean();
-$html = preg_replace('/(<form[^>]*>)/', '$1' . "\n  <input type=\"hidden\" name=\"id\" value=\"" . (int)$id . "\">", $html, 1);
+$html = preg_replace('/(<form\b[^>]*>)/', '$1' . "\n  <input type=\"hidden\" name=\"id\" value=\"" . (int)$id . "\">", $html, 1);
 echo $html;
 ?>
 <?php render_footer(); ?>

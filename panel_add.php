@@ -24,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         $panelId = create_panel($projectId, $data);
+        save_panel_attachments($panelId, 'panel_attachments');
 
         $msg = 'เพิ่มตู้เรียบร้อยแล้ว';
         if (!empty($_POST['auto_tasks'])) {
@@ -72,7 +73,7 @@ render_header('เพิ่มตู้ — ' . $project['project_no'], 'project
 ob_start();
 require __DIR__ . '/_panel_form.php';
 $html = ob_get_clean();
-$html = preg_replace('/(<form[^>]*>)/', '$1' . "\n  <input type=\"hidden\" name=\"project_id\" value=\"" . (int)$projectId . "\">", $html, 1);
+$html = preg_replace('/(<form\b[^>]*>)/', '$1' . "\n  <input type=\"hidden\" name=\"project_id\" value=\"" . (int)$projectId . "\">", $html, 1);
 echo $html;
 ?>
 <?php render_footer(); ?>

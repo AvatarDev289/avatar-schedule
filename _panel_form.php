@@ -3,19 +3,22 @@
  * _panel_form.php — shared add/edit form for a panel/cabinet.
  * Expects: $pn (values), $project (parent project), $isEdit (bool).
  */
-$effS      = compute_panel_status($pn);
-$effLabel  = panel_effective_label($pn);
-$effColor  = panel_status_color($effS);
-$taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
+$effS               = compute_panel_status($pn);
+$effLabel           = panel_effective_label($pn);
+$effColor           = panel_status_color($effS);
+$taskCount          = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
+$existingPanelAtts  = !empty($pn['id']) ? get_panel_attachments((int)$pn['id']) : [];
+
+$panelTypes = ['MDB','DB','MCC','ATS','PLC','LDB','SDB'];
 ?>
-<form method="post" class="needs-validation" novalidate>
+<form method="post" enctype="multipart/form-data" class="needs-validation" novalidate>
   <div class="panel">
     <div class="panel-head"><i class="bi bi-hdd"></i> ข้อมูลตู้ / Panel</div>
     <div class="panel-body">
       <div class="row g-3">
         <div class="col-md-3">
           <label class="form-label">Panel No. <span class="req">*</span></label>
-          <input name="panel_no" class="form-control" required value="<?= e($pn['panel_no'] ?? '') ?>">
+          <input name="panel_no" class="form-control" required placeholder="เลขที่ MO" value="<?= e($pn['panel_no'] ?? '') ?>">
         </div>
         <div class="col-md-6">
           <label class="form-label">ชื่อตู้ <span class="req">*</span></label>
@@ -23,7 +26,12 @@ $taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
         </div>
         <div class="col-md-3">
           <label class="form-label">ประเภท (Type)</label>
-          <input name="panel_type" class="form-control" placeholder="MDB / DB / PLC ..." value="<?= e($pn['panel_type'] ?? '') ?>">
+          <select name="panel_type" id="panelTypeSel" class="form-select">
+            <option value="">— เลือกประเภท —</option>
+            <?php foreach ($panelTypes as $pt): ?>
+              <option value="<?= $pt ?>" <?= ($pn['panel_type'] ?? '') === $pt ? 'selected' : '' ?>><?= $pt ?></option>
+            <?php endforeach; ?>
+          </select>
         </div>
 
         <div class="col-md-3">
@@ -36,12 +44,9 @@ $taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
         </div>
         <div class="col-md-3">
           <label class="form-label">ผู้รับผิดชอบ</label>
-          <input name="responsible" class="form-control" value="<?= e($pn['responsible'] ?? '') ?>">
+          <input name="responsible" class="form-control" placeholder="ผสานงาน" value="<?= e($pn['responsible'] ?? '') ?>">
         </div>
-        <div class="col-md-3">
-          <label class="form-label">ลำดับแสดงผล</label>
-          <input type="number" name="sort_order" class="form-control" value="<?= e($pn['sort_order'] ?? '0') ?>">
-        </div>
+
 
         <div class="col-md-4">
           <label class="form-label">วันเริ่มงาน (Planned Start)</label>
@@ -86,6 +91,61 @@ $taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
           <label class="form-label">หมายเหตุ</label>
           <textarea name="remark" class="form-control" rows="2"><?= e($pn['remark'] ?? '') ?></textarea>
         </div>
+
+        <!-- File attachments -->
+        <div class="col-12">
+          <label class="form-label">
+            <i class="bi bi-file-earmark-arrow-up"></i> แนบไฟล์
+            <small class="text-muted fw-normal">(PDF, Excel, รูปภาพ — ไม่จำกัดจำนวน)</small>
+          </label>
+          <div class="file-drop-zone" id="pnlFileDropZone">
+            <input type="file" id="pnlAttachmentsInput" name="panel_attachments[]"
+                   multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.dwg,.zip,.rar"
+                   class="file-drop-input">
+            <div class="file-drop-label">
+              <i class="bi bi-cloud-upload fs-3 text-muted"></i>
+              <div class="mt-1">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</div>
+              <small class="text-muted">PDF, Word, Excel, รูปภาพ, DWG, ZIP</small>
+            </div>
+            <div id="pnlFileList" class="file-list mt-2"></div>
+          </div>
+        </div>
+
+        <?php if ($existingPanelAtts): ?>
+        <div class="col-12">
+          <label class="form-label"><i class="bi bi-paperclip"></i> ไฟล์แนบที่มีอยู่ (<?= count($existingPanelAtts) ?> ไฟล์)</label>
+          <div class="existing-attachments">
+            <?php foreach ($existingPanelAtts as $att): ?>
+              <?php
+                $ext  = strtolower(pathinfo($att['original_name'] ?? $att['file_name'], PATHINFO_EXTENSION));
+                $icon = match(true) {
+                    in_array($ext, ['pdf'])                          => 'bi-file-earmark-pdf text-danger',
+                    in_array($ext, ['xls','xlsx','csv'])             => 'bi-file-earmark-excel text-success',
+                    in_array($ext, ['doc','docx'])                   => 'bi-file-earmark-word text-primary',
+                    in_array($ext, ['png','jpg','jpeg','gif','webp']) => 'bi-file-earmark-image text-info',
+                    in_array($ext, ['dwg'])                          => 'bi-file-earmark-code text-warning',
+                    in_array($ext, ['zip','rar'])                    => 'bi-file-earmark-zip text-secondary',
+                    default                                          => 'bi-file-earmark text-muted',
+                };
+                $kb = ($att['file_size'] ?? 0) > 0 ? round($att['file_size'] / 1024, 1) . ' KB' : '';
+              ?>
+              <div class="att-row" id="pnl-att-<?= (int)$att['id'] ?>">
+                <i class="bi <?= $icon ?> att-icon"></i>
+                <a href="<?= e(UPLOAD_URL . '/' . $att['file_name']) ?>" target="_blank" class="att-name">
+                  <?= e($att['original_name'] ?? $att['file_name']) ?>
+                </a>
+                <?php if ($kb): ?><span class="att-size text-muted"><?= $kb ?></span><?php endif; ?>
+                <button type="button" class="btn btn-sm btn-outline-danger btn-pnl-att-del"
+                        data-id="<?= (int)$att['id'] ?>"
+                        data-name="<?= e($att['original_name'] ?? $att['file_name']) ?>">
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+        <?php endif; ?>
+
       </div>
     </div>
   </div>
@@ -203,6 +263,34 @@ $taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
   </div>
 </form>
 
+<style>
+.file-drop-zone {
+  position: relative; border: 2px dashed #CBD5E1; border-radius: 10px;
+  padding: 20px; text-align: center; cursor: pointer;
+  transition: border-color .2s, background .2s; background: #F8FAFC;
+}
+.file-drop-zone.dragover { border-color: #FF7A00; background: #FFF7ED; }
+.file-drop-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 2; }
+.file-drop-label { pointer-events: none; }
+.file-list { text-align: left; position: relative; z-index: 3; }
+.file-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  border-radius: 6px; background: #fff; border: 1px solid #E2E8F0; margin-bottom: 4px; font-size: 13px;
+  position: relative; z-index: 3;
+}
+.file-item-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-item-size { color: #94A3B8; white-space: nowrap; }
+.file-item-del { border: none; background: none; color: #EF4444; cursor: pointer; padding: 0 4px; font-size: 14px; position: relative; z-index: 3; }
+.existing-attachments { display: flex; flex-direction: column; gap: 6px; }
+.att-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-radius: 6px; background: #F8FAFC; border: 1px solid #E2E8F0; font-size: 13px;
+}
+.att-icon { font-size: 16px; flex-shrink: 0; }
+.att-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-size { font-size: 11px; white-space: nowrap; }
+</style>
+
 <script>
 (function () {
   var DB_TPLS = <?= json_encode($dbTplStepsJs, JSON_UNESCAPED_UNICODE) ?>;
@@ -214,7 +302,7 @@ $taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
   var psdInput = document.getElementById('plannedStartDate');
 
   function panelTypeVal() {
-    var el = document.querySelector('input[name="panel_type"]');
+    var el = document.getElementById('panelTypeSel');
     return el ? el.value.toUpperCase().trim() : '';
   }
 
@@ -273,10 +361,91 @@ $taskCount = !empty($pn['id']) ? count_panel_tasks((int)$pn['id']) : 0;
   if (chk) chk.addEventListener('change', toggleWrap);
   if (sel) sel.addEventListener('change', showSteps);
   if (psdInput) psdInput.addEventListener('change', showSteps);
-  var ptInput = document.querySelector('input[name="panel_type"]');
-  if (ptInput) ptInput.addEventListener('input', showSteps);
+  var ptSel = document.getElementById('panelTypeSel');
+  if (ptSel) ptSel.addEventListener('change', showSteps);
 
   toggleWrap();
   showSteps();
 })();
+
+/* ── File drop zone ── */
+(function () {
+  var zone    = document.getElementById('pnlFileDropZone');
+  var input   = document.getElementById('pnlAttachmentsInput');
+  var fileList = document.getElementById('pnlFileList');
+  if (!zone || !input) return;
+
+  var selected = [];
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB';
+    return (bytes/1048576).toFixed(1) + ' MB';
+  }
+
+  function renderList() {
+    fileList.innerHTML = '';
+    selected.forEach(function (f, i) {
+      var item = document.createElement('div');
+      item.className = 'file-item';
+      item.innerHTML = '<span class="file-item-name">' + f.name + '</span>'
+        + '<span class="file-item-size">' + fmtSize(f.size) + '</span>'
+        + '<button type="button" class="file-item-del" data-i="' + i + '">✕</button>';
+      fileList.appendChild(item);
+    });
+    syncInput();
+  }
+
+  function syncInput() {
+    var dt = new DataTransfer();
+    selected.forEach(function (f) { dt.items.add(f); });
+    input.files = dt.files;
+  }
+
+  fileList.addEventListener('click', function (e) {
+    var btn = e.target.closest('.file-item-del');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    selected.splice(parseInt(btn.dataset.i, 10), 1);
+    renderList();
+  });
+
+  input.addEventListener('change', function () {
+    Array.from(input.files).forEach(function (f) { selected.push(f); });
+    renderList();
+  });
+
+  zone.addEventListener('dragover', function (e) { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', function () { zone.classList.remove('dragover'); });
+  zone.addEventListener('drop', function (e) {
+    e.preventDefault(); zone.classList.remove('dragover');
+    Array.from(e.dataTransfer.files).forEach(function (f) { selected.push(f); });
+    renderList();
+  });
+}());
+
+/* ── Delete existing panel attachment (AJAX) ── */
+document.querySelectorAll('.btn-pnl-att-del').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var id   = btn.dataset.id;
+    var name = btn.dataset.name;
+    if (!confirm('ลบไฟล์ "' + name + '" ?')) return;
+    btn.disabled = true;
+    fetch('api/panel_attachment_delete.php', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: parseInt(id, 10)})
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.ok) {
+        document.getElementById('pnl-att-' + id)?.remove();
+      } else {
+        alert('ลบไม่สำเร็จ'); btn.disabled = false;
+      }
+    })
+    .catch(function () { alert('เกิดข้อผิดพลาด'); btn.disabled = false; });
+  });
+});
 </script>
