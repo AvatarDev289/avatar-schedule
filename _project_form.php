@@ -194,13 +194,13 @@ $existingAttachments = $existingAttachments ?? [];
                   ?>
                   <div class="att-row" id="att-<?= (int)$att['id'] ?>">
                     <i class="bi <?= $icon ?> att-icon"></i>
-                    <a href="<?= e(UPLOAD_URL . '/' . $att['file_name']) ?>" target="_blank" class="att-name">
-                      <?= e($att['original_name']) ?>
+                    <a href="<?= e(UPLOAD_URL . '/' . ($att['file_path'] ?? $att['file_name'])) ?>" target="_blank" class="att-name">
+                      <?= e($att['original_name'] ?? $att['file_name']) ?>
                     </a>
                     <?php if ($kb): ?><span class="att-size text-muted"><?= $kb ?></span><?php endif; ?>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-att-del"
                             data-id="<?= (int)$att['id'] ?>"
-                            data-name="<?= e($att['original_name']) ?>">
+                            data-name="<?= e($att['original_name'] ?? $att['file_name']) ?>">
                       <i class="bi bi-trash3"></i>
                     </button>
                   </div>

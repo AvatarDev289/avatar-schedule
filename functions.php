@@ -1890,8 +1890,8 @@ function save_project_attachments(int $projectId, string $field = 'attachments')
     $sizes   = (array)$_FILES[$field]['size'];
     $types   = (array)$_FILES[$field]['type'];
     $ins = db()->prepare(
-        "INSERT INTO project_attachments (project_id, file_name, original_name, file_size, mime_type)
-         VALUES (:pid, :fn, :on, :sz, :mt)"
+        "INSERT INTO project_attachments (project_id, file_path, file_name, original_name, file_size, mime_type)
+         VALUES (:pid, :fp, :fn, :on, :sz, :mt)"
     );
     $saved = 0;
     foreach ($names as $i => $orig) {
@@ -1903,7 +1903,8 @@ function save_project_attachments(int $projectId, string $field = 'attachments')
         if (!move_uploaded_file($tmps[$i], UPLOAD_DIR . '/' . $safe)) continue;
         $ins->execute([
             ':pid' => $projectId,
-            ':fn'  => $safe,
+            ':fp'  => $safe,
+            ':fn'  => $orig,
             ':on'  => $orig,
             ':sz'  => (int)($sizes[$i] ?? 0),
             ':mt'  => $types[$i] ?? '',
@@ -1967,7 +1968,7 @@ function delete_panel_attachment(int $attachId, int $panelId): bool
 function get_project_attachments(int $projectId): array
 {
     $st = db()->prepare(
-        "SELECT * FROM project_attachments WHERE project_id = :pid ORDER BY uploaded_at DESC"
+        "SELECT * FROM project_attachments WHERE project_id = :pid ORDER BY created_at DESC"
     );
     $st->execute([':pid' => $projectId]);
     return $st->fetchAll();
@@ -1976,11 +1977,11 @@ function get_project_attachments(int $projectId): array
 /** Delete a single attachment (by id, scoped to project for safety). */
 function delete_project_attachment(int $attachId, int $projectId): bool
 {
-    $st = db()->prepare("SELECT file_name FROM project_attachments WHERE id = :id AND project_id = :pid");
+    $st = db()->prepare("SELECT file_path FROM project_attachments WHERE id = :id AND project_id = :pid");
     $st->execute([':id' => $attachId, ':pid' => $projectId]);
     $row = $st->fetch();
     if (!$row) return false;
-    $path = UPLOAD_DIR . '/' . $row['file_name'];
+    $path = UPLOAD_DIR . '/' . $row['file_path'];
     if (file_exists($path)) @unlink($path);
     db()->prepare("DELETE FROM project_attachments WHERE id = :id")->execute([':id' => $attachId]);
     return true;
